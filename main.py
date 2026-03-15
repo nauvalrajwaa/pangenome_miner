@@ -91,6 +91,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose", "-v", action="store_true",
         help="Enable DEBUG-level logging.",
     )
+    parser.add_argument(
+        "--model-dir", type=Path, default=None,
+        help="Directory with BGC-Prophet model weights (annotator.pt + classifier.pt)."
+    )
+    parser.add_argument(
+        "--esm-model", type=str, default="esm2_t6_8M_UR50D",
+        help=(
+            "ESM2 protein language model variant for Phase 3 embeddings. "
+            "Options: esm2_t6_8M_UR50D (default, ~30 MB), esm2_t12_35M_UR50D (~140 MB), "
+            "esm2_t30_150M_UR50D (~600 MB), esm2_t33_650M_UR50D (~2.5 GB), "
+            "esm2_t36_3B_UR50D (~11 GB), esm2_t48_15B_UR50D (~60 GB)."
+        ),
+    )
     return parser
 
 
@@ -214,7 +227,7 @@ def run_phase3(hgt_result: HGTResult, args: argparse.Namespace) -> BGCResult:
     logger.info("PHASE 3 — The AI Discoverer (BGC Prediction)")
     logger.info("=" * 60)
 
-    predictor = BGCPredictor(seed=42, min_confidence=0.25, use_keyword_boost=True)
+    predictor = BGCPredictor(seed=42, min_confidence=0.25, use_keyword_boost=True, model_dir=args.model_dir, esm_model_name=args.esm_model)
     bgc_result = predictor.run(hgt_result)
 
     # Phase 3 Visualizations
@@ -257,8 +270,8 @@ def run_phase3(hgt_result: HGTResult, args: argparse.Namespace) -> BGCResult:
         f"  BGC hits              : {stats.get('n_bgc_hits', 0)} ({stats.get('bgc_hit_rate', 0):.1%})\n"
         f"  High-confidence hits  : {stats.get('n_high_confidence', 0)}\n"
         f"  Top BGC class         : {stats.get('top_class', 'N/A')}\n"
-        f"  Inference engine      : {'PyTorch' if stats.get('torch_used') else 'NumPy mock'}\n"
-        f"{'─' * 55}\n"
+        f"  Inference engine      : {'BGC-Prophet' if stats.get('prophet_used') else ('PyTorch' if stats.get('torch_used') else 'NumPy mock')}\n"
+        f"  ESM2 model            : {stats.get('esm_model', 'N/A')}\n"
         f"  Outputs → {p3_dir}/\n"
     )
     return bgc_result

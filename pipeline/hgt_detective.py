@@ -36,11 +36,12 @@ logger = logging.getLogger(__name__)
 MGE_KEYWORDS = frozenset([
     "transposase", "integrase", "recombinase", "resolvase",
     "phage", "prophage", "insertion sequence", "is element",
-    "conjugal", "plasmid", "relaxase", "mob protein",
+    "conjugal", "conjugative", "plasmid", "relaxase", "mob protein",
+    "mobilization", "mobilase",
     "terminase", "capsid", "tail fiber", "portal protein",
     "site-specific recombinase", "serine recombinase",
     "tyrosine recombinase", "hin recombinase", "xre",
-    "toxin", "antitoxin", "crispr",
+    "toxin", "antitoxin", "crispr", "crispr-associated", "cas protein",
 ])
 
 # Distance threshold (bp) for MGE proximity flag

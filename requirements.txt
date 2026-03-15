@@ -10,10 +10,11 @@ biopython>=1.81
 # Machine Learning / Anomaly Detection (Phase 2)
 scikit-learn>=1.3.0
 
-# Deep Learning (Phase 3)
+# Deep Learning / BGC Prediction (Phase 3)
 torch>=2.0.0
-transformers>=4.30.0       # For ProtBERT / protein language models
-torch-geometric>=2.3.0     # For Graph Neural Networks
+fair-esm>=2.0.0              # ESM2 protein language models (ESM2-8M)
+bgc-prophet>=0.1.2           # BGC-Prophet trained annotator/classifier
+lmdb>=1.4.0                  # Required by bgc-prophet internals
 
 # Visualization
 seaborn>=0.12.0

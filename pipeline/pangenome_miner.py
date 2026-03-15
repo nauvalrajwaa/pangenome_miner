@@ -118,7 +118,13 @@ def _sequence_for_region(
     """
     if contig not in fasta_records:
         return ""
-    seq = fasta_records[contig].seq[start - 1: end]
+    contig_len = len(fasta_records[contig].seq)
+    # Clamp coordinates to valid range (1-based inclusive → 0-based slice)
+    s = max(start - 1, 0)
+    e = min(end, contig_len)
+    if s >= e:
+        return ""
+    seq = fasta_records[contig].seq[s:e]
     if strand == "-":
         seq = seq.reverse_complement()
     return str(seq)
@@ -248,6 +254,8 @@ class PangenomeMiner:
 
         self.core_threshold = core_threshold
         self.accessory_threshold = accessory_threshold
+        if not (0.0 < identity_threshold <= 1.0):
+            raise ValueError(f"identity_threshold must be in (0, 1], got {identity_threshold}")
         self.identity_threshold = identity_threshold
         self.feature_types = set(feature_types or ["CDS"])
         self.min_gene_length = min_gene_length
@@ -517,6 +525,8 @@ class PangenomeMiner:
         # (e.g. 10% of 5 strains = 0.5, so nothing qualifies as accessory).
         # Effective threshold: at least 1 strain worth of presence, i.e. 1/n_strains.
         effective_acc = max(self.accessory_threshold, 1.0 / n_strains)
+        # Safety clamp: effective_acc must never reach core_threshold
+        effective_acc = min(effective_acc, self.core_threshold - 1e-6)
         if effective_acc > self.accessory_threshold:
             logger.info(
                 "accessory_threshold %.2f adjusted to %.2f (= 1/%d strains) ",

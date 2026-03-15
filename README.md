@@ -12,12 +12,13 @@ A modular, end-to-end Python pipeline for discovering Biosynthetic Gene Clusters
 2. [Workflow Flowchart](#workflow-flowchart)
 3. [Phase 1 — Pangenome Miner](#phase-1--pangenome-miner)
 4. [Phase 2 — HGT Detective](#phase-2--hgt-detective)
-5. [Phase 3 — AI BGC Predictor](#phase-3--ai-bgc-predictor)
-6. [Output Files](#output-files)
-7. [Installation](#installation)
-8. [Usage & Examples](#usage--examples)
-9. [Project Structure](#project-structure)
-10. [Testing](#testing)
+5. [Phase 3 — AI BGC Predictor (BGC-Prophet)](#phase-3--ai-bgc-predictor-bgc-prophet)
+6. [ESM2 Model Selection](#esm2-model-selection)
+7. [Output Files](#output-files)
+8. [Installation](#installation)
+9. [Usage & Examples](#usage--examples)
+10. [Project Structure](#project-structure)
+11. [Testing](#testing)
 
 ---
 
@@ -28,6 +29,14 @@ PanAdapt-BGC Miner answers one central question:
 > **Which genes in an accessory/adaptive genome are horizontally transferred biosynthetic gene clusters of biotechnological interest?**
 
 It ingests raw genome assemblies (FASTA) and their NCBI PGAP or Prokka annotations (GFF3), then pipes them through three phases, each building on the previous one. Final output is a set of publication-ready plots and self-contained HTML reports — one per phase.
+
+### Key Features
+
+- **BGC-Prophet integration**: Trained TransformerEncoder models (annotator + classifier) with ESM2 protein language model embeddings for biologically meaningful BGC predictions
+- **Flexible ESM2 model selection**: Choose from 6 ESM2 variants (8M to 15B parameters) to trade off speed vs. embedding quality
+- **Automatic fallback**: Graceful degradation to mock inference when BGC-Prophet or ESM2 is unavailable
+- **Three-phase pipeline**: Pangenome → HGT → BGC, each phase producing independent visualizations and reports
+- **Publication-ready output**: Self-contained HTML reports, heatmaps, distribution plots, and CSV prediction matrices
 
 ---
 
@@ -98,30 +107,28 @@ It ingests raw genome assemblies (FASTA) and their NCBI PGAP or Prokka annotatio
                                │  alien_records  (HGT-flagged genes)
                                ▼
 ╔═════════════════════════════════════════════════════════════════════════╗
-║  PHASE 3 — AI BGC Predictor (bgc_predictor.py)                        ║
+║  PHASE 3 — BGC-Prophet AI Predictor (bgc_predictor.py)                 ║
 ║                                                                         ║
 ║  Input: HGT-flagged alien gene records from Phase 2                    ║
 ║                                                                         ║
-║  Feature vector (per alien gene):                                       ║
-║    [gc_content, gc_deviation, kmer_deviation, anomaly_score,           ║
-║     gene_length_norm, mge_proximity, is_multimodule_keyword,           ║
-║     is_regulatory_keyword]                                              ║
+║  Step 1 — Protein translation:                                          ║
+║    └── CDS DNA → amino acid sequences (BioPython Seq.translate)        ║
 ║                                                                         ║
-║  Keyword boost scoring (product annotation):                            ║
-║    ├── NRPS:        "nrps", "non-ribosomal peptide synthetase", "NrpS" ║
-║    ├── PKS-I/II:    "polyketide synthase", "pks", "ketosynthase"       ║
-║    ├── Terpene:     "terpene", "geranyl", "sesquiterpene"              ║
-║    ├── Siderophore: "siderophore", "enterobactin", "aerobactin"        ║
-║    └── RiPP:        "lasso peptide", "bacteriocin", "microcin"        ║
+║  Step 2 — ESM2 protein embeddings:                                      ║
+║    └── ESM2 model (configurable, default: esm2_t6_8M_UR50D)           ║
+║        Per-protein mean-pooled embedding (320-dim after projection)     ║
 ║                                                                         ║
-║  PyTorch model:  BGCClassifier  (3-layer MLP)                          ║
-║    Input  → 128 → 64 → 8 logits                                        ║
-║    Classes: NRPS | PKS-I | PKS-II | Hybrid | Terpene |                ║
-║             Siderophore | RiPP | Non-BGC                               ║
-║    (mock weights — replace with trained checkpoint for production)     ║
+║  Step 3 — BGC-Prophet Annotator (TransformerEncoder):                   ║
+║    └── 128-gene windows → per-gene BGC probability (sigmoid)           ║
+║        Genes with P(BGC) ≥ 0.50 → flagged as biosynthetic              ║
 ║                                                                         ║
-║  Thresholding:  confidence ≥ 0.25  →  BGC hit                         ║
-║                 confidence ≥ 0.70  →  high-confidence hit              ║
+║  Step 4 — BGC-Prophet Classifier (TransformerEncoder):                  ║
+║    └── 7-class sigmoid classification of BGC-positive windows          ║
+║        Classes: Alkaloid | Terpene | NRP | Polyketide | RiPP |         ║
+║                 Saccharide | Other                                      ║
+║                                                                         ║
+║  Step 5 — Keyword boost (optional):                                     ║
+║    └── Product annotation keywords boost matching class scores          ║
 ║                                                                         ║
 ║  Outputs:  BGCResult dataclass                                          ║
 ║            phase3/bgc_class_distribution.png                           ║
@@ -199,9 +206,9 @@ Phase 2 screens every accessory gene for signatures of **horizontal gene transfe
 | Step | Description |
 |------|-------------|
 | **Host profile** | For each strain, compute the mean GC content and mean tetranucleotide frequency across all contigs. This represents the "native" genomic signature. |
-| **GC deviation** | `|gene_GC − host_GC| / host_GC`. High values (>5%) indicate foreign origin. |
+| **GC deviation** | `\|gene_GC − host_GC\| / host_GC`. High values (>5%) indicate foreign origin. |
 | **K-mer deviation** | `1 − cosine_similarity(gene_4mer_vector, host_4mer_vector)`. Captures compositional mismatch beyond GC alone. |
-| **MGE proximity** | Scans all annotated genes for MGE keywords (transposase, integrase, IS element, phage, recombinase, resolvase). Any gene within **10 kbp** of an MGE is flagged `mge_proximity=True`. |
+| **MGE proximity** | Scans all annotated genes for 25+ MGE keywords (transposase, integrase, IS element, phage, recombinase, resolvase, conjugative, mobilization, CRISPR-associated, etc.). Any gene within **10 kbp** of an MGE is flagged `mge_proximity=True`. |
 | **Isolation Forest** | Fits an `IsolationForest` (scikit-learn) on the 4-feature matrix `[gc_dev, kmer_dev, mge_prox, gc_content]` with `contamination=0.30`. Genes with label `−1` (top 30% anomalies) are marked `is_hgt=True`. Fallback: if the variance is near-zero, all top-30% by GC deviation are flagged instead. |
 | **Evidence assembly** | Each flagged gene gets a human-readable evidence list: "High GC deviation", "High k-mer deviation", "MGE proximal", "Isolation Forest anomaly". |
 
@@ -221,47 +228,134 @@ hgt_result: HGTResult = detective.run(phase1_result, fasta_store)
 
 ---
 
-## Phase 3 — AI BGC Predictor
+## Phase 3 — AI BGC Predictor (BGC-Prophet)
 
 **Module:** `pipeline/bgc_predictor.py`
 
 ### What it does
 
-Phase 3 asks: *"Among the alien genes found by Phase 2, which ones are part of a Biosynthetic Gene Cluster?"* It uses a PyTorch MLP classifier combined with product-annotation keyword boosting to assign each alien gene a BGC class and confidence score.
+Phase 3 asks: *"Among the alien genes found by Phase 2, which ones are part of a Biosynthetic Gene Cluster?"* It uses the **BGC-Prophet** trained model — a TransformerEncoder architecture powered by ESM2 protein language model embeddings — to perform gene-level BGC annotation and type classification.
 
-### BGC classes
+### BGC-Prophet Model
+
+[BGC-Prophet](https://github.com/HUST-NingKang-Lab/BGC-Prophet) (MIT License) uses two trained TransformerEncoder models:
+
+| Component | Architecture | Input | Output |
+|-----------|-------------|-------|--------|
+| **Annotator** | PositionalEncoding → TransformerEncoder (2 layers, 5 heads) → per-position MLP → Sigmoid | 128-gene windows of 320-dim embeddings | Per-gene BGC probability |
+| **Classifier** | PositionalEncoding → TransformerEncoder (2 layers, 5 heads) → mean pool → Linear(320→7) → Sigmoid | 128-gene windows + padding mask | 7-class BGC type probabilities |
+
+### BGC Classes
 
 | Class | Description |
 |-------|-------------|
-| **NRPS** | Non-Ribosomal Peptide Synthetase — produces peptide natural products |
-| **PKS-I** | Modular Type I Polyketide Synthase — produces macrolides, rapamycin-like |
-| **PKS-II** | Iterative Type II PKS — produces aromatic polyketides, tetracyclines |
-| **Hybrid** | NRPS–PKS hybrid clusters |
-| **Terpene** | Terpenoid biosynthesis — produces geosmin, hopanoids |
-| **Siderophore** | Iron-chelating compounds — desferrioxamine-type |
+| **Alkaloid** | Alkaloid biosynthesis clusters |
+| **Terpene** | Terpenoid biosynthesis — geosmin, hopanoids |
+| **NRP** | Non-Ribosomal Peptide — produced by NRPS enzymes |
+| **Polyketide** | Polyketide biosynthesis — macrolides, Type I/II PKS |
 | **RiPP** | Ribosomally synthesised & Post-translationally modified Peptides — lasso peptides, bacteriocins |
-| **Non-BGC** | No BGC signature detected |
+| **Saccharide** | Saccharide/sugar-based natural product clusters |
+| **Other** | Other BGC types not in the above categories |
+| **NonBGC** | No BGC signature detected |
 
-### Algorithm detail
+### Pipeline Flow
 
-| Step | Description |
-|------|-------------|
-| **Feature engineering** | 8-dimensional vector per alien gene: `[gc_content, gc_deviation, kmer_deviation, anomaly_score, gene_length_norm, mge_proximity, multimodule_keyword_flag, regulatory_keyword_flag]`. |
-| **Keyword boost** | Scans `product` field for domain-specific keywords (e.g. "adenylation domain", "ketosynthase", "terpene cyclase"). Boosts the matching class logit by +2.0 before softmax. |
-| **PyTorch MLP** | `BGCClassifier`: `Linear(8→128) → ReLU → Dropout(0.3) → Linear(128→64) → ReLU → Dropout(0.3) → Linear(64→8)`. Weights currently mock-random; replace `models/bgc_classifier.pth` with a trained checkpoint for production. |
-| **Thresholding** | Confidence ≥ 0.25 → BGC hit · Confidence ≥ 0.70 → high-confidence hit. |
-| **NumPy fallback** | If PyTorch is unavailable, uses a pure-NumPy MLP with identical topology and the same mock weights. |
+```
+CDS DNA sequences (from Phase 1)
+        │
+        ▼
+┌─────────────────────────────┐
+│  BioPython Seq.translate()  │  DNA → Protein
+└────────────┬────────────────┘
+             ▼
+┌─────────────────────────────┐
+│  ESM2 Protein Embeddings    │  Per-protein → 320-dim vector
+│  (configurable model)       │  (auto-projection if dim ≠ 320)
+└────────────┬────────────────┘
+             ▼
+┌─────────────────────────────┐
+│  128-Gene Windowing         │  Group by contig, pad/split
+└────────────┬────────────────┘
+             ▼
+┌─────────────────────────────┐
+│  BGC-Prophet Annotator      │  Per-gene: BGC or Non-BGC
+│  (TransformerEncoder)       │  threshold ≥ 0.50
+└────────────┬────────────────┘
+             ▼
+┌─────────────────────────────┐
+│  BGC-Prophet Classifier     │  Per-window: 7-class BGC type
+│  (TransformerEncoder)       │  + keyword boost scoring
+└────────────┬────────────────┘
+             ▼
+   BGCGeneRecord per gene
+   BGCResult with statistics
+```
 
 ### Key classes
 
 ```python
 BGCPredictor(
     seed=42,
-    min_confidence=0.25,      # minimum softmax score to call a BGC hit
-    use_keyword_boost=True,   # boost logits from product annotation keywords
-    model_path=None,          # path to trained .pth weights (None = mock)
+    min_confidence=0.25,             # minimum score to call a BGC hit
+    use_keyword_boost=True,          # boost scores from product annotation keywords
+    model_dir=None,                  # path to BGC-Prophet weights (auto-detected)
+    esm_model_name="esm2_t6_8M_UR50D",  # ESM2 model variant (see table below)
 )
 bgc_result: BGCResult = predictor.run(hgt_result)
+```
+
+### Fallback Mode
+
+When BGC-Prophet dependencies are unavailable (`fair-esm`, model weights), the predictor gracefully falls back to a mock MLP with random weights. This allows the pipeline structure to run without the trained model, but predictions will not be biologically meaningful.
+
+---
+
+## ESM2 Model Selection
+
+The ESM2 protein language model used for embedding extraction is **configurable at runtime** via the `--esm-model` argument. Larger models produce richer protein representations but require more memory and compute time.
+
+| Model Name | Layers | Embed Dim | Approx. Size | Notes |
+|------------|--------|-----------|-------------|-------|
+| `esm2_t6_8M_UR50D` | 6 | 320 | ~30 MB | **Default.** Best match for BGC-Prophet (trained with this model). |
+| `esm2_t12_35M_UR50D` | 12 | 480 | ~140 MB | Moderate upgrade. Requires linear projection 480→320. |
+| `esm2_t30_150M_UR50D` | 30 | 640 | ~600 MB | Richer embeddings. Needs ~2 GB RAM. |
+| `esm2_t33_650M_UR50D` | 33 | 1280 | ~2.5 GB | Large model. Needs GPU recommended. |
+| `esm2_t36_3B_UR50D` | 36 | 2560 | ~11 GB | Very large. GPU required. |
+| `esm2_t48_15B_UR50D` | 48 | 5120 | ~60 GB | Largest ESM2. Multi-GPU recommended. |
+
+### Important Notes
+
+- **Default (`esm2_t6_8M_UR50D`) is recommended** for most use cases — BGC-Prophet's annotator and classifier were trained with 320-dim embeddings from this model.
+- When using a non-default model, a **linear projection layer** (embed_dim → 320) is automatically inserted. This projection is initialized with Xavier weights but is **not fine-tuned**, so prediction quality may differ from the default model.
+- The ESM2 model weights are automatically downloaded from the `fair-esm` package on first use and cached locally.
+
+### Usage
+
+```bash
+# Default ESM2-8M (recommended)
+python main.py --genomes data/genomes --annotations data/annotations --output output/
+
+# Use a larger model (35M parameters)
+python main.py --genomes data/genomes --annotations data/annotations --output output/ \
+  --esm-model esm2_t12_35M_UR50D
+
+# Use 150M parameter model (needs ~2 GB RAM)
+python main.py --genomes data/genomes --annotations data/annotations --output output/ \
+  --esm-model esm2_t30_150M_UR50D
+```
+
+### Programmatic Access
+
+```python
+from pipeline.bgc_predictor import BGCPredictor, ESM2_REGISTRY
+
+# List all supported models
+for name, spec in ESM2_REGISTRY.items():
+    print(f"{name}: {spec['layers']} layers, {spec['embed_dim']}d, ~{spec['params']} params")
+
+# Use a specific model
+predictor = BGCPredictor(esm_model_name="esm2_t12_35M_UR50D")
+result = predictor.run(hgt_result)
 ```
 
 ---
@@ -284,7 +378,7 @@ output/
     ├── bgc_heatmap.png                  # per-strain × BGC class heatmap
     ├── bgc_confidence_landscape.png     # anomaly score vs BGC confidence scatter
     ├── phase3_report.html              # HTML report with predictions table
-    └── prediction_matrix.csv           # full per-gene prediction scores
+    └── prediction_matrix.csv           # full per-gene prediction scores (8 classes)
 ```
 
 ---
@@ -295,6 +389,7 @@ output/
 
 - Python 3.10+
 - conda (recommended) or pip
+- ~200 MB disk for model weights (BGC-Prophet + ESM2-8M)
 
 ### Steps
 
@@ -310,20 +405,93 @@ conda activate panadapt
 # 3. Install Python dependencies
 pip install -r requirements.txt
 
-# 4. (Optional) Install MMseqs2 for faster ortholog clustering at scale
+# 4. Download BGC-Prophet model weights
+mkdir -p models/model
+wget -q "https://github.com/HUST-NingKang-Lab/BGC-Prophet/files/12733164/model.tar.gz" \
+  -O models/model.tar.gz
+tar -xzf models/model.tar.gz -C models/
+rm models/model.tar.gz
+
+# 5. (Optional) Install MMseqs2 for faster ortholog clustering at scale
 conda install -c bioconda mmseqs2
 ```
+
+### Verify Installation
+
+```bash
+# Check all dependencies
+python -c "
+from pipeline.bgc_predictor import BGCPredictor, ESM2_REGISTRY, _PROPHET_AVAILABLE
+print(f'BGC-Prophet available: {_PROPHET_AVAILABLE}')
+print(f'Supported ESM2 models: {list(ESM2_REGISTRY.keys())}')
+"
+
+# Run tests
+python -m pytest tests/ -v
+```
+
+### Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `torch` | ≥2.0.0 | Deep learning framework |
+| `fair-esm` | ≥2.0.0 | ESM2 protein language models |
+| `bgc-prophet` | ≥0.1.2 | BGC-Prophet annotator/classifier models |
+| `lmdb` | ≥1.4.0 | Required by bgc-prophet internals |
+| `biopython` | ≥1.80 | GFF/FASTA parsing, DNA→protein translation |
+| `scikit-learn` | ≥1.2 | Isolation Forest (Phase 2) |
+| `pandas` | ≥1.5 | Data manipulation |
+| `numpy` | ≥1.23 | Numerical operations |
+| `matplotlib` | ≥3.6 | Plotting |
+| `seaborn` | ≥0.12 | Statistical plots |
+| `plotly` | ≥5.0 | Interactive plots |
+| `jinja2` | ≥3.1 | HTML report templating |
+| `loguru` | ≥0.7 | Structured logging |
+| `tqdm` | ≥4.60 | Progress bars |
 
 ---
 
 ## Usage & Examples
 
-### Minimal run — real genome data
+### Quick start — bundled test data (5 Streptomyces abikoensis MAGs)
 
 ```bash
 python main.py \
   --genomes    tests/real_data/genomes \
   --annotations tests/real_data/annotations \
+  --output     tests/output \
+  --verbose
+```
+
+Expected output:
+```
+═══ Phase 1: Pangenome Analysis ═══
+  Strains analyzed       : 5
+  Total CDS genes        : ~32,000
+  Ortholog clusters      : ~5,050
+  Accessory genes        : ~2,021
+
+═══ Phase 2: HGT Detection ═══
+  Genes screened         : ~2,021
+  Alien HGT genes        : ~606 (~30%)
+
+═══ Phase 3: BGC Prediction ═══
+  Alien genes scored     : ~606
+  BGC hits               : ~43 (~7%)
+  High-confidence hits   : ~27
+  Top BGC class          : RiPP
+  Inference engine       : BGC-Prophet
+  ESM2 model             : esm2_t6_8M_UR50D
+```
+
+Expected runtime: ~4–6 minutes (Phase 1 k-mer clustering dominates; Phase 3 ESM2 embedding ~30 seconds).
+
+### Minimal run
+
+```bash
+python main.py \
+  --genomes    data/genomes \
+  --annotations data/annotations \
   --output     output/
 ```
 
@@ -337,6 +505,28 @@ python main.py \
   --core-threshold       0.95 \
   --accessory-threshold  0.10 \
   --identity             0.80 \
+  --model-dir            models/model \
+  --esm-model            esm2_t6_8M_UR50D \
+  --verbose
+```
+
+### Using a larger ESM2 model
+
+```bash
+# 35M parameter model — richer embeddings, ~4x slower
+python main.py \
+  --genomes    tests/real_data/genomes \
+  --annotations tests/real_data/annotations \
+  --output     output_35M/ \
+  --esm-model  esm2_t12_35M_UR50D \
+  --verbose
+
+# 150M parameter model — needs ~2 GB RAM
+python main.py \
+  --genomes    tests/real_data/genomes \
+  --annotations tests/real_data/annotations \
+  --output     output_150M/ \
+  --esm-model  esm2_t30_150M_UR50D \
   --verbose
 ```
 
@@ -367,20 +557,7 @@ python main.py \
   --verbose
 ```
 
-### Replicating the paper test run (5 Streptomyces abikoensis soil MAGs)
-
-```bash
-python main.py \
-  --genomes     tests/real_data/genomes \
-  --annotations tests/real_data/annotations \
-  --output      tests/output \
-  --identity    0.80 \
-  --verbose
-```
-
-Expected runtime: ~4–6 minutes (Phase 1 k-mer clustering dominates; 5 strains × ~6,500 CDS each).
-
-### CLI reference
+### CLI Reference
 
 ```
 usage: panadapt-bgc-miner [-h]
@@ -389,6 +566,8 @@ usage: panadapt-bgc-miner [-h]
        [--core-threshold CORE_THRESHOLD]
        [--accessory-threshold ACCESSORY_THRESHOLD]
        [--identity IDENTITY]
+       [--model-dir MODEL_DIR]
+       [--esm-model ESM_MODEL]
        [--mock] [--verbose]
 
 options:
@@ -398,6 +577,11 @@ options:
   --core-threshold       Fraction of strains for Core genes  [default: 0.95]
   --accessory-threshold  Max fraction of strains for Accessory  [default: 0.10]
   --identity             Ortholog clustering Jaccard threshold  [default: 0.80]
+  --model-dir            Directory with BGC-Prophet model weights  [default: models/model/]
+  --esm-model            ESM2 model variant for protein embeddings  [default: esm2_t6_8M_UR50D]
+                         Options: esm2_t6_8M_UR50D, esm2_t12_35M_UR50D,
+                         esm2_t30_150M_UR50D, esm2_t33_650M_UR50D,
+                         esm2_t36_3B_UR50D, esm2_t48_15B_UR50D
   --mock                 Use auto-generated synthetic data (ignores --genomes/--annotations)
   --verbose, -v          Enable DEBUG logging
 ```
@@ -409,7 +593,7 @@ options:
 ```
 proj_6_magsanalysis/
 ├── main.py                        # Pipeline entry point & CLI
-├── requirements.txt
+├── requirements.txt               # Python dependencies
 ├── README.md
 ├── .gitignore
 │
@@ -419,11 +603,13 @@ proj_6_magsanalysis/
 │   ├── phase1_visualizer.py       # Phase 1 — heatmap, summary plot, HTML report
 │   ├── hgt_detective.py           # Phase 2 — HGT scoring & Isolation Forest
 │   ├── phase2_visualizer.py       # Phase 2 — genomic island map, distributions, HTML
-│   ├── bgc_predictor.py           # Phase 3 — PyTorch BGC classifier
+│   ├── bgc_predictor.py           # Phase 3 — BGC-Prophet AI predictor (ESM2 + TransformerEncoder)
 │   └── phase3_visualizer.py       # Phase 3 — class distribution, heatmap, HTML
 │
 ├── models/
-│   └── bgc_classifier.pth         # (trained weights go here; currently empty)
+│   └── model/
+│       ├── annotator.pt           # BGC-Prophet annotator weights (~10 MB)
+│       └── classifier.pt          # BGC-Prophet classifier weights (~10 MB)
 │
 ├── tests/
 │   ├── test_pangenome_miner.py    # 18 Phase 1 unit tests
@@ -458,3 +644,11 @@ python -m pytest tests/ --cov=pipeline --cov-report=term-missing
 ```
 
 Current test status: **50/50 passing** (18 Phase 1 + 32 Phase 2).
+
+---
+
+## Acknowledgments
+
+- **BGC-Prophet** — [HUST-NingKang-Lab/BGC-Prophet](https://github.com/HUST-NingKang-Lab/BGC-Prophet) (MIT License) for the trained BGC annotator and classifier models
+- **ESM2** — [facebookresearch/esm](https://github.com/facebookresearch/esm) for protein language models
+- Test data: 5 *Streptomyces abikoensis* soil MAG assemblies from NCBI

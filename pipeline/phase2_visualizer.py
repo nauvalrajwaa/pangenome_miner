@@ -9,6 +9,7 @@ Purpose : Generate Phase 2 output artefacts:
 """
 
 from __future__ import annotations
+from pipeline.hgt_detective import MGE_KEYWORDS
 
 import logging
 from pathlib import Path
@@ -104,8 +105,7 @@ def plot_genomic_island_architecture(
                 color = "#922b21"    # dark red — Alien HGT
                 zorder = 4
             elif rec.mge_proximity and any(
-                kw in gene.product.lower()
-                for kw in ("transposase", "integrase", "phage", "insertion")
+                kw in gene.product.lower() for kw in MGE_KEYWORDS
             ):
                 color = "#d35400"    # orange — MGE
                 zorder = 3
