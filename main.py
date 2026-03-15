@@ -104,6 +104,13 @@ def build_parser() -> argparse.ArgumentParser:
             "esm2_t36_3B_UR50D (~11 GB), esm2_t48_15B_UR50D (~60 GB)."
         ),
     )
+    parser.add_argument(
+        "--device", type=str, default="auto",
+        help=(
+            "Compute device for Phase 3 ESM2 / BGC-Prophet inference. "
+            "Options: auto (default, picks CUDA > MPS > CPU), cuda, mps, cpu."
+        ),
+    )
     return parser
 
 
@@ -227,7 +234,7 @@ def run_phase3(hgt_result: HGTResult, args: argparse.Namespace) -> BGCResult:
     logger.info("PHASE 3 — The AI Discoverer (BGC Prediction)")
     logger.info("=" * 60)
 
-    predictor = BGCPredictor(seed=42, min_confidence=0.25, use_keyword_boost=True, model_dir=args.model_dir, esm_model_name=args.esm_model)
+    predictor = BGCPredictor(seed=42, min_confidence=0.25, use_keyword_boost=True, model_dir=args.model_dir, esm_model_name=args.esm_model, device=args.device)
     bgc_result = predictor.run(hgt_result)
 
     # Phase 3 Visualizations
@@ -272,6 +279,7 @@ def run_phase3(hgt_result: HGTResult, args: argparse.Namespace) -> BGCResult:
         f"  Top BGC class         : {stats.get('top_class', 'N/A')}\n"
         f"  Inference engine      : {'BGC-Prophet' if stats.get('prophet_used') else ('PyTorch' if stats.get('torch_used') else 'NumPy mock')}\n"
         f"  ESM2 model            : {stats.get('esm_model', 'N/A')}\n"
+        f"  Device                : {stats.get('device', 'N/A')}\n"
         f"  Outputs → {p3_dir}/\n"
     )
     return bgc_result

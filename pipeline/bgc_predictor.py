@@ -360,11 +360,21 @@ class ProphetBackend:
     def __init__(
         self,
         model_dir: Path,
-        device: str = "cpu",
+        device: str = "auto",
         esm_model_name: str = _ESM2_MODEL_NAME,
     ) -> None:
         self.model_dir = model_dir
+
+        # ── Auto-detect compute device ────────────────────────────────
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
         self.device = torch.device(device)
+        logger.info("ProphetBackend: using device '%s'", device)
 
         # ── Resolve ESM2 model specification ──────────────────────────
         if esm_model_name not in ESM2_REGISTRY:
@@ -401,7 +411,9 @@ class ProphetBackend:
         )
 
         # ── Embedding projection (when embed_dim ≠ 320) ──────────────
+        # Default annotator threshold (may be lowered when projection is active)
         self._projection: Optional[nn.Linear] = None
+        self._annotator_threshold: float = _ANNOTATOR_THRESHOLD  # 0.5 by default
         if self._esm_embed_dim != self._PROPHET_EXPECTED_DIM:
             logger.info(
                 "Adding linear projection %d-dim → %d-dim for BGC-Prophet compatibility",
@@ -416,11 +428,13 @@ class ProphetBackend:
             self._projection = self._projection.to(self.device)
             self._projection.eval()
             logger.warning(
-                "⚠ Projection layer is NOT trained — prediction quality may degrade "
-                "compared to the default ESM2-8M model.  For best results use "
-                "'esm2_t6_8M_UR50D' or provide a fine-tuned projection checkpoint."
+                "⚠ Projection layer is NOT trained — applying L2 normalisation before ",
+                "projection and lowering annotator threshold to 0.35 to account for ",
+                "distributional shift.  For best results use 'esm2_t6_8M_UR50D'.",
             )
+            # Lower threshold to compensate for distributional shift from untrained projection
 
+            self._annotator_threshold = 0.35
         # ── Load Annotator (transformerEncoderNet) ────────────────────
         annotator_path = model_dir / "annotator.pt"
         if not annotator_path.exists():
@@ -544,6 +558,11 @@ class ProphetBackend:
                 # Project to 320-dim if using a non-8M model
                 if self._projection is not None:
                     with torch.no_grad():
+                        # L2-normalise before projection to stabilise the
+                        # scale mismatch between different ESM2 model sizes.
+                        mean_repr = torch.nn.functional.normalize(
+                            mean_repr.unsqueeze(0), dim=-1
+                        ).squeeze(0)
                         mean_repr = self._projection(mean_repr)
 
                 embeddings[label] = mean_repr.cpu().numpy()
@@ -665,7 +684,7 @@ class ProphetBackend:
             class_scores has N_CLASSES (8) entries including NonBGC at index 0
         """
         # If annotator says non-BGC
-        if bgc_prob < _ANNOTATOR_THRESHOLD:
+        if bgc_prob < self._annotator_threshold:
             non_bgc_conf = 1.0 - bgc_prob
             # class_scores: [NonBGC_conf, 0, 0, 0, 0, 0, 0, 0]
             class_scores = [non_bgc_conf] + [0.0] * len(_PROPHET_TYPE_LABELS)
@@ -771,7 +790,7 @@ class ProphetBackend:
             )
 
         # Step 2: ESM2 embedding
-        logger.info("  Extracting ESM2-8M embeddings ...")
+        logger.info("  Extracting ESM2 (%s) embeddings ...", self._esm_model_name)
         embeddings = self._extract_esm2_embeddings(gene_ids, protein_seqs)
         logger.info("  Obtained %d embeddings", len(embeddings))
 
@@ -1032,6 +1051,7 @@ class BGCPredictor:
         use_keyword_boost: bool = True,
         model_dir: Optional[Path] = None,
         esm_model_name: str = _ESM2_MODEL_NAME,
+        device: str = "auto",
     ) -> None:
         self.seed = seed
         self.min_confidence = min_confidence
@@ -1055,6 +1075,7 @@ class BGCPredictor:
                     self._prophet = ProphetBackend(
                         model_dir=model_dir,
                         esm_model_name=esm_model_name,
+                        device=device,
                     )
                     self._use_prophet = True
                     logger.info(
@@ -1153,6 +1174,7 @@ class BGCPredictor:
             "torch_used":        _TORCH_AVAILABLE,
             "prophet_used":      self._use_prophet,
             "esm_model":         self._prophet._esm_model_name if self._use_prophet else None,
+            "device":             str(self._prophet.device) if self._use_prophet else "cpu",
         }
 
         logger.info(
