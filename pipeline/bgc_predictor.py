@@ -410,53 +410,72 @@ class ProphetBackend:
             sum(p.numel() for p in self._esm_model.parameters()),
         )
 
-        # ── Embedding projection (when embed_dim ≠ 320) ──────────────
-        # Default annotator threshold (may be lowered when projection is active)
-        self._projection: Optional[nn.Linear] = None
+        # ── Check for model-specific weights (native dimension) ────────
+        model_specific_dir = model_dir / esm_model_name
+        has_native_weights = (
+            (model_specific_dir / "annotator.pt").exists()
+            and (model_specific_dir / "classifier.pt").exists()
+        )
+
+        self._needs_pca_projection = False
         self._annotator_threshold: float = _ANNOTATOR_THRESHOLD  # 0.5 by default
-        if self._esm_embed_dim != self._PROPHET_EXPECTED_DIM:
+
+        if has_native_weights:
+            # ── Native-dimension weights found — no PCA needed ────────
+            d_model = self._esm_embed_dim
+            dim_ff = d_model * 4
+            annotator_path = model_specific_dir / "annotator.pt"
+            classifier_path = model_specific_dir / "classifier.pt"
             logger.info(
-                "Adding linear projection %d-dim → %d-dim for BGC-Prophet compatibility",
+                "Found model-specific weights for '%s' (%d-dim) — "
+                "using native dimension, no PCA projection needed",
+                esm_model_name, d_model,
+            )
+        elif self._esm_embed_dim != self._PROPHET_EXPECTED_DIM:
+            # ── No model-specific weights, dimension mismatch → PCA ──
+            d_model = self._PROPHET_EXPECTED_DIM
+            dim_ff = 1280
+            annotator_path = model_dir / "annotator.pt"
+            classifier_path = model_dir / "classifier.pt"
+            logger.info(
+                "Adding PCA projection %d-dim → %d-dim for BGC-Prophet compatibility",
                 self._esm_embed_dim, self._PROPHET_EXPECTED_DIM,
             )
-            self._projection = nn.Linear(
-                self._esm_embed_dim, self._PROPHET_EXPECTED_DIM, bias=True
-            )
-            # Xavier init for a reasonable starting point (un-trained projection)
-            nn.init.xavier_uniform_(self._projection.weight)
-            nn.init.zeros_(self._projection.bias)
-            self._projection = self._projection.to(self.device)
-            self._projection.eval()
-            logger.warning(
-                "⚠ Projection layer is NOT trained — applying L2 normalisation before ",
-                "projection and lowering annotator threshold to 0.35 to account for ",
-                "distributional shift.  For best results use 'esm2_t6_8M_UR50D'.",
-            )
-            # Lower threshold to compensate for distributional shift from untrained projection
-
+            self._needs_pca_projection = True
             self._annotator_threshold = 0.35
+            logger.warning(
+                "⚠ PCA projection is data-driven but not BGC-trained — "
+                "annotator threshold lowered to 0.35.  "
+                "For best results, train model-specific weights with train_prophet.py "
+                "or use 'esm2_t6_8M_UR50D'.",
+            )
+        else:
+            # ── Default 320-dim weights, exact match ─────────────────
+            d_model = self._PROPHET_EXPECTED_DIM
+            dim_ff = 1280
+            annotator_path = model_dir / "annotator.pt"
+            classifier_path = model_dir / "classifier.pt"
+
         # ── Load Annotator (transformerEncoderNet) ────────────────────
-        annotator_path = model_dir / "annotator.pt"
         if not annotator_path.exists():
             raise FileNotFoundError(f"Annotator weights not found: {annotator_path}")
         self._annotator = transformerEncoderNet(
-            d_model=self._PROPHET_EXPECTED_DIM, nhead=5, num_encoder_layers=2,
-            max_len=_PROPHET_WINDOW_SIZE, dim_feedforward=1280,
+            d_model=d_model, nhead=5, num_encoder_layers=2,
+            max_len=_PROPHET_WINDOW_SIZE, dim_feedforward=dim_ff,
         )
         self._annotator.load_state_dict(
             torch.load(str(annotator_path), map_location=self.device, weights_only=False)
         )
         self._annotator = self._annotator.to(self.device)
         self._annotator.eval()
-        logger.info("BGC-Prophet annotator loaded: %s", annotator_path)
+        logger.info("BGC-Prophet annotator loaded: %s (d_model=%d)", annotator_path, d_model)
 
         # ── Load Classifier (transformerClassifier) ───────────────────
-        classifier_path = model_dir / "classifier.pt"
         if not classifier_path.exists():
             raise FileNotFoundError(f"Classifier weights not found: {classifier_path}")
         self._classifier = transformerClassifier(
-            d_model=self._PROPHET_EXPECTED_DIM, nhead=5, num_encoder_layers=2,
-            max_len=_PROPHET_WINDOW_SIZE, dim_feedforward=1280,
+            d_model=d_model, nhead=5, num_encoder_layers=2,
+            max_len=_PROPHET_WINDOW_SIZE, dim_feedforward=dim_ff,
             labels_num=len(_PROPHET_TYPE_LABELS),
         )
         self._classifier.load_state_dict(
@@ -464,7 +483,7 @@ class ProphetBackend:
         )
         self._classifier = self._classifier.to(self.device)
         self._classifier.eval()
-        logger.info("BGC-Prophet classifier loaded: %s", classifier_path)
+        logger.info("BGC-Prophet classifier loaded: %s (d_model=%d)", classifier_path, d_model)
     # ------------------------------------------------------------------
     # Step 1: DNA → Protein translation
     # ------------------------------------------------------------------
@@ -555,20 +574,36 @@ class ProphetBackend:
                 token_repr = representations[j, 1:seq_len + 1, :]  # (seq_len, embed_dim)
                 mean_repr = token_repr.mean(dim=0)  # (embed_dim,)
 
-                # Project to 320-dim if using a non-8M model
-                if self._projection is not None:
-                    with torch.no_grad():
-                        # L2-normalise before projection to stabilise the
-                        # scale mismatch between different ESM2 model sizes.
-                        mean_repr = torch.nn.functional.normalize(
-                            mean_repr.unsqueeze(0), dim=-1
-                        ).squeeze(0)
-                        mean_repr = self._projection(mean_repr)
-
                 embeddings[label] = mean_repr.cpu().numpy()
 
             if batch_end % (batch_size * 5) == 0 or batch_end == total:
                 logger.info("  ESM2 embedding progress: %d/%d proteins", batch_end, total)
+
+
+        # ── PCA projection (non-8M models) ────────────────────────
+        if self._needs_pca_projection and embeddings:
+            from sklearn.decomposition import PCA  # lazy import
+
+            labels = list(embeddings.keys())
+            raw = np.stack([embeddings[l] for l in labels])  # (N, embed_dim)
+            n_components = min(self._PROPHET_EXPECTED_DIM, raw.shape[0], raw.shape[1])
+
+            pca = PCA(n_components=n_components, random_state=42)
+            projected = pca.fit_transform(raw)  # (N, 320)
+
+            # If fewer samples than 320, pad with zeros to match Prophet dim
+            if n_components < self._PROPHET_EXPECTED_DIM:
+                pad = np.zeros((projected.shape[0], self._PROPHET_EXPECTED_DIM - n_components))
+                projected = np.concatenate([projected, pad], axis=1)
+
+            explained = sum(pca.explained_variance_ratio_) * 100
+            logger.info(
+                "  PCA %d → %d  |  variance retained: %.1f%%  |  %d samples",
+                raw.shape[1], n_components, explained, raw.shape[0],
+            )
+
+            for i, lbl in enumerate(labels):
+                embeddings[lbl] = projected[i]
 
         return embeddings
 
@@ -586,14 +621,15 @@ class ProphetBackend:
 
         Returns:
             window_gene_ids: list of lists, each inner list has gene_ids in that window
-            window_embeddings: (n_windows, 128, 320) tensor
+            window_embeddings: (n_windows, 128, embed_dim) tensor
             padding_masks: (n_windows, 128) boolean tensor (True = padded)
         """
         # Filter to genes that have embeddings
         valid_gene_ids = [gid for gid in gene_ids if gid in embeddings]
 
         if not valid_gene_ids:
-            return [], np.zeros((0, _PROPHET_WINDOW_SIZE, _ESM2_EMBED_DIM)), \
+            embed_dim = self._esm_embed_dim if not self._needs_pca_projection else self._PROPHET_EXPECTED_DIM
+            return [], np.zeros((0, _PROPHET_WINDOW_SIZE, embed_dim)), \
                    np.ones((0, _PROPHET_WINDOW_SIZE), dtype=bool)
 
         # Split into non-overlapping windows of size 128
@@ -604,8 +640,10 @@ class ProphetBackend:
             all_window_ids.append(valid_gene_ids[start:end])
 
         n_windows = len(all_window_ids)
+        # Determine embed dim from actual embeddings
+        embed_dim = embeddings[valid_gene_ids[0]].shape[0]
         window_embs = np.zeros(
-            (n_windows, _PROPHET_WINDOW_SIZE, _ESM2_EMBED_DIM), dtype=np.float32
+            (n_windows, _PROPHET_WINDOW_SIZE, embed_dim), dtype=np.float32
         )
         pad_masks = np.ones((n_windows, _PROPHET_WINDOW_SIZE), dtype=bool)
 
@@ -625,7 +663,7 @@ class ProphetBackend:
         Run BGC-Prophet annotator on windowed embeddings.
 
         Args:
-            window_embeddings: (n_windows, 128, 320) float32
+            window_embeddings: (n_windows, 128, embed_dim) float32
 
         Returns:
             (n_windows, 128) float32 — per-gene BGC probability (sigmoid output)

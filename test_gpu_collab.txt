@@ -1,114 +1,152 @@
-2026-03-15 10:35:45 [INFO] panadapt_bgc_miner — ============================================================ 2026-03-15 
-10:35:45 [INFO] panadapt_bgc_miner — PHASE 1 — The Comparatist Engine (Pangenome Analysis) 2026-03-15 10:35:45 [INFO] 
-panadapt_bgc_miner — ============================================================ 2026-03-15 10:35:45 [INFO] 
-pipeline.pangenome_miner — PangenomeMiner initialised | core_threshold=0.95 | accessory_threshold=0.10 | identity=0.80 
-2026-03-15 10:35:47 [INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_JCM4002 2026-03-15 10:35:48 
-[INFO] pipeline.pangenome_miner — └─ 6283 features loaded from Streptomyces_abikoensis_JCM4002.fna 2026-03-15 10:35:48 
-[INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_NPDC019920 2026-03-15 10:35:50 [INFO] 
-pipeline.pangenome_miner — └─ 6593 features loaded from Streptomyces_abikoensis_NPDC019920.fna 2026-03-15 10:35:50 
-[INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_NPDC020039 2026-03-15 10:35:52 [INFO] 
-pipeline.pangenome_miner — └─ 6857 features loaded from Streptomyces_abikoensis_NPDC020039.fna 2026-03-15 10:35:52 
-[INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_NPDC048735 2026-03-15 10:35:53 [INFO] 
-pipeline.pangenome_miner — └─ 6373 features loaded from Streptomyces_abikoensis_NPDC048735.fna 2026-03-15 10:35:53 
-[INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_NPDC059550 2026-03-15 10:35:55 [INFO] 
-pipeline.pangenome_miner — └─ 6378 features loaded from Streptomyces_abikoensis_NPDC059550.fna 2026-03-15 10:35:55 
-[INFO] pipeline.pangenome_miner — Data ingestion complete: 5 strains, 32484 total gene features. 2026-03-15 10:35:55 
-[INFO] pipeline.pangenome_miner — Running lightweight k-mer ortholog clustering on 32484 sequences … 2026-03-15 10:47:01 
-[INFO] pipeline.pangenome_miner — Clustering complete: 32484 genes → 5050 ortholog clusters (identity ≥ 80%) 2026-03-15 
-10:47:01 [INFO] pipeline.pangenome_miner — Building presence/absence matrix … 2026-03-15 10:47:01 [INFO] 
-pipeline.pangenome_miner — Presence/absence matrix: 5050 clusters × 5 strains 2026-03-15 10:47:01 [INFO] 
-pipeline.pangenome_miner — accessory_threshold 0.10 adjusted to 0.20 (= 1/5 strains) 2026-03-15 10:47:01 [INFO] 
-pipeline.pangenome_miner — Pangenome partitioning (5 strains, accessory ≤ 20%):
-  Core (≥95%):  1620 clusters Shell :  1424 clusters Accessory (≤20%):  2006 clusters 2026-03-15 10:47:01 [INFO] 
-pipeline.pangenome_miner — Phase 1 complete. Passing 2021 accessory gene coordinates to Phase 2. 2026-03-15 10:47:01 
-[INFO] pipeline.pangenome_miner — Presence/absence matrix saved → tests/output/phase1_presence_absence_matrix.csv 
-2026-03-15 10:47:01 [INFO] panadapt_bgc_miner — Generating Phase 1 visualizations … 2026-03-15 10:47:01 [INFO] 
-pipeline.phase1_visualizer — Heatmap: subsampled to 500 most variable clusters 2026-03-15 10:47:02 [INFO] 
-pipeline.phase1_visualizer — Heatmap saved → tests/output/phase1/presence_absence_heatmap.png 2026-03-15 10:47:02 [INFO] 
-pipeline.phase1_visualizer — Summary chart saved → tests/output/phase1/pangenome_summary.png 2026-03-15 10:47:02 [INFO] 
-pipeline.phase1_visualizer — Phase 1 HTML report saved → tests/output/phase1/phase1_report.html 
+2026-03-15 11:36:24 [INFO] panadapt_bgc_miner — ============================================================
+2026-03-15 11:36:24 [INFO] panadapt_bgc_miner — PHASE 1 — The Comparatist Engine (Pangenome Analysis)
+2026-03-15 11:36:24 [INFO] panadapt_bgc_miner — ============================================================
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner — PangenomeMiner initialised | core_threshold=0.95 | accessory_threshold=0.10 | identity=0.80
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_JCM4002
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner —   └─ 6283 features loaded from Streptomyces_abikoensis_JCM4002.fna
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_NPDC019920
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner —   └─ 6593 features loaded from Streptomyces_abikoensis_NPDC019920.fna
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_NPDC020039
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner —   └─ 6857 features loaded from Streptomyces_abikoensis_NPDC020039.fna
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_NPDC048735
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner —   └─ 6373 features loaded from Streptomyces_abikoensis_NPDC048735.fna
+2026-03-15 11:36:24 [INFO] pipeline.pangenome_miner — Loading strain: Streptomyces_abikoensis_NPDC059550
+2026-03-15 11:36:25 [INFO] pipeline.pangenome_miner —   └─ 6378 features loaded from Streptomyces_abikoensis_NPDC059550.fna
+2026-03-15 11:36:25 [INFO] pipeline.pangenome_miner — Data ingestion complete: 5 strains, 32484 total gene features.
+2026-03-15 11:36:25 [INFO] pipeline.pangenome_miner — Running lightweight k-mer ortholog clustering on 32484 sequences …
+2026-03-15 11:46:41 [INFO] pipeline.pangenome_miner — Clustering complete: 32484 genes → 5050 ortholog clusters (identity ≥ 80%)
+2026-03-15 11:46:41 [INFO] pipeline.pangenome_miner — Building presence/absence matrix …
+2026-03-15 11:46:41 [INFO] pipeline.pangenome_miner — Presence/absence matrix: 5050 clusters × 5 strains
+2026-03-15 11:46:41 [INFO] pipeline.pangenome_miner — accessory_threshold 0.10 adjusted to 0.20 (= 1/5 strains) 
+2026-03-15 11:46:41 [INFO] pipeline.pangenome_miner — Pangenome partitioning (5 strains, accessory ≤ 20%):
+  Core       (≥95%):  1620 clusters
+  Shell                :  1424 clusters
+  Accessory  (≤20%):  2006 clusters
+2026-03-15 11:46:41 [INFO] pipeline.pangenome_miner — Phase 1 complete. Passing 2021 accessory gene coordinates to Phase 2.
+2026-03-15 11:46:41 [INFO] pipeline.pangenome_miner — Presence/absence matrix saved → tests/output/phase1_presence_absence_matrix.csv
+2026-03-15 11:46:41 [INFO] panadapt_bgc_miner — Generating Phase 1 visualizations …
+2026-03-15 11:46:41 [INFO] pipeline.phase1_visualizer — Heatmap: subsampled to 500 most variable clusters
+2026-03-15 11:46:41 [INFO] pipeline.phase1_visualizer — Heatmap saved → tests/output/phase1/presence_absence_heatmap.png
+2026-03-15 11:46:42 [INFO] pipeline.phase1_visualizer — Summary chart saved → tests/output/phase1/pangenome_summary.png
+2026-03-15 11:46:42 [INFO] pipeline.phase1_visualizer — Phase 1 HTML report saved → tests/output/phase1/phase1_report.html
+
 ───────────────────────────────────────────────────────
-  Phase 1 Summary 
+  Phase 1 Summary
 ───────────────────────────────────────────────────────
-  Strains analysed : 5 Total clusters : 5050 Core genome : 1620 clusters Shell genome : 1424 clusters Accessory genome : 
-  2006 clusters (2021 individual genes)
+  Strains analysed   : 5
+  Total clusters     : 5050
+  Core genome        : 1620 clusters
+  Shell genome       : 1424 clusters
+  Accessory genome   : 2006 clusters (2021 individual genes)
 ───────────────────────────────────────────────────────
-  Outputs → tests/output/phase1/ 2026-03-15 10:47:02 [INFO] panadapt_bgc_miner — 
-============================================================ 2026-03-15 10:47:02 [INFO] panadapt_bgc_miner — PHASE 2 — The 
-HGT Detective 2026-03-15 10:47:02 [INFO] panadapt_bgc_miner — ============================================================ 
-2026-03-15 10:47:02 [INFO] pipeline.hgt_detective — HGTDetective initialised | contamination=0.30 | trees=200 2026-03-15 
-10:47:02 [INFO] pipeline.hgt_detective — Phase 2 starting: 2021 accessory gene records across 5 strains 2026-03-15 
-10:47:06 [INFO] pipeline.hgt_detective — Phase 2 complete: 606 / 2021 accessory genes flagged as Alien_HGT_Regions (30.0%) 
-2026-03-15 10:47:06 [INFO] panadapt_bgc_miner — Generating Phase 2 visualizations … 2026-03-15 10:47:08 [INFO] 
-pipeline.phase2_visualizer — Genomic island plot saved → 
-tests/output/phase2/genomic_island_Streptomyces_abikoensis_JCM4002.png 2026-03-15 10:47:10 [INFO] 
-pipeline.phase2_visualizer — Genomic island plot saved → 
-tests/output/phase2/genomic_island_Streptomyces_abikoensis_NPDC019920.png 2026-03-15 10:47:12 [INFO] 
-pipeline.phase2_visualizer — Genomic island plot saved → 
-tests/output/phase2/genomic_island_Streptomyces_abikoensis_NPDC020039.png 2026-03-15 10:47:13 [INFO] 
-pipeline.phase2_visualizer — Genomic island plot saved → 
-tests/output/phase2/genomic_island_Streptomyces_abikoensis_NPDC048735.png 2026-03-15 10:47:14 [INFO] 
-pipeline.phase2_visualizer — Genomic island plot saved → 
-tests/output/phase2/genomic_island_Streptomyces_abikoensis_NPDC059550.png 2026-03-15 10:47:15 [INFO] 
-pipeline.phase2_visualizer — HGT feature distribution plot saved → tests/output/phase2/hgt_feature_distributions.png 
-2026-03-15 10:47:15 [INFO] pipeline.phase2_visualizer — Phase 2 HTML report saved → 
-tests/output/phase2/phase2_report.html 
+  Outputs → tests/output/phase1/
+
+2026-03-15 11:46:42 [INFO] panadapt_bgc_miner — ============================================================
+2026-03-15 11:46:42 [INFO] panadapt_bgc_miner — PHASE 2 — The HGT Detective
+2026-03-15 11:46:42 [INFO] panadapt_bgc_miner — ============================================================
+2026-03-15 11:46:42 [INFO] pipeline.hgt_detective — HGTDetective initialised | contamination=0.30 | trees=200
+2026-03-15 11:46:42 [INFO] pipeline.hgt_detective — Phase 2 starting: 2021 accessory gene records across 5 strains
+2026-03-15 11:46:46 [INFO] pipeline.hgt_detective — Phase 2 complete: 606 / 2021 accessory genes flagged as Alien_HGT_Regions (30.0%)
+2026-03-15 11:46:46 [INFO] panadapt_bgc_miner — Generating Phase 2 visualizations …
+2026-03-15 11:46:48 [INFO] pipeline.phase2_visualizer — Genomic island plot saved → tests/output/phase2/genomic_island_Streptomyces_abikoensis_JCM4002.png
+2026-03-15 11:46:49 [INFO] pipeline.phase2_visualizer — Genomic island plot saved → tests/output/phase2/genomic_island_Streptomyces_abikoensis_NPDC019920.png
+2026-03-15 11:46:50 [INFO] pipeline.phase2_visualizer — Genomic island plot saved → tests/output/phase2/genomic_island_Streptomyces_abikoensis_NPDC020039.png
+2026-03-15 11:46:52 [INFO] pipeline.phase2_visualizer — Genomic island plot saved → tests/output/phase2/genomic_island_Streptomyces_abikoensis_NPDC048735.png
+2026-03-15 11:46:53 [INFO] pipeline.phase2_visualizer — Genomic island plot saved → tests/output/phase2/genomic_island_Streptomyces_abikoensis_NPDC059550.png
+2026-03-15 11:46:54 [INFO] pipeline.phase2_visualizer — HGT feature distribution plot saved → tests/output/phase2/hgt_feature_distributions.png
+2026-03-15 11:46:54 [INFO] pipeline.phase2_visualizer — Phase 2 HTML report saved → tests/output/phase2/phase2_report.html
+
 ───────────────────────────────────────────────────────
-  Phase 2 Summary 
+  Phase 2 Summary
 ───────────────────────────────────────────────────────
-  Accessory genes analysed : 2021 Alien HGT regions flagged : 606 (30.0%) MGE-proximal genes : 354 
+  Accessory genes analysed  : 2021
+  Alien HGT regions flagged : 606 (30.0%)
+  MGE-proximal genes        : 354
 ───────────────────────────────────────────────────────
-  Outputs → tests/output/phase2/ 2026-03-15 10:47:15 [INFO] panadapt_bgc_miner — 
-============================================================ 2026-03-15 10:47:15 [INFO] panadapt_bgc_miner — PHASE 3 — The 
-AI Discoverer (BGC Prediction) 2026-03-15 10:47:15 [INFO] panadapt_bgc_miner — 
-============================================================ 2026-03-15 10:47:15 [INFO] pipeline.bgc_predictor — Loading 
-ESM2 model 'esm2_t30_150M_UR50D' (~150M params, 640-dim embeddings) ... Downloading: 
-"https://dl.fbaipublicfiles.com/fair-esm/models/esm2_t30_150M_UR50D.pt" to 
-/root/.cache/torch/hub/checkpoints/esm2_t30_150M_UR50D.pt Downloading: 
-"https://dl.fbaipublicfiles.com/fair-esm/regression/esm2_t30_150M_UR50D-contact-regression.pt" to 
-/root/.cache/torch/hub/checkpoints/esm2_t30_150M_UR50D-contact-regression.pt 2026-03-15 10:47:21 [INFO] 
-pipeline.bgc_predictor — ESM2 'esm2_t30_150M_UR50D' loaded (148140154 parameters) 2026-03-15 10:47:21 [INFO] 
-pipeline.bgc_predictor — Adding linear projection 640-dim → 320-dim for BGC-Prophet compatibility 2026-03-15 10:47:21 
-[WARNING] pipeline.bgc_predictor — ⚠ Projection layer is NOT trained — prediction quality may degrade compared to the 
-default ESM2-8M model.  For best results use 'esm2_t6_8M_UR50D' or provide a fine-tuned projection checkpoint. 
-/usr/local/lib/python3.12/dist-packages/bgc_prophet/train/model.py:26: UserWarning: enable_nested_tensor is True, but 
-self.use_nested_tensor is False because encoder_layer.norm_first was True
-  self.encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm) 2026-03-15 10:47:21 [INFO] 
-pipeline.bgc_predictor — BGC-Prophet annotator loaded: /content/pangenome_miner/models/model/annotator.pt 
-/usr/local/lib/python3.12/dist-packages/bgc_prophet/train/classifier.py:23: UserWarning: enable_nested_tensor is True, but 
-self.use_nested_tensor is False because encoder_layer.norm_first was True
-  self.encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm) 2026-03-15 10:47:21 [INFO] 
-pipeline.bgc_predictor — BGC-Prophet classifier loaded: /content/pangenome_miner/models/model/classifier.pt 2026-03-15 
-10:47:21 [INFO] pipeline.bgc_predictor — BGCPredictor: BGC-Prophet backend active (ESM2 'esm2_t30_150M_UR50D' + trained 
-models) 2026-03-15 10:47:21 [INFO] pipeline.bgc_predictor — Phase 3 | BGCPredictor | 606 alien genes to score 2026-03-15 
-10:47:21 [INFO] pipeline.bgc_predictor — Phase 3 | Using BGC-Prophet trained model backend 2026-03-15 10:47:21 [INFO] 
-pipeline.bgc_predictor — Prophet backend: processing 606 alien genes 2026-03-15 10:47:21 [INFO] pipeline.bgc_predictor — 
-Translated 606/606 genes to protein (0 skipped) 2026-03-15 10:47:21 [INFO] pipeline.bgc_predictor — Extracting ESM2-8M 
-embeddings ... 2026-03-15 10:50:59 [INFO] pipeline.bgc_predictor — ESM2 embedding progress: 80/606 proteins 2026-03-15 
-10:53:20 [INFO] pipeline.bgc_predictor — ESM2 embedding progress: 160/606 proteins 2026-03-15 10:56:31 [INFO] 
-pipeline.bgc_predictor — ESM2 embedding progress: 240/606 proteins 2026-03-15 10:59:06 [INFO] pipeline.bgc_predictor — 
-ESM2 embedding progress: 320/606 proteins 2026-03-15 11:02:14 [INFO] pipeline.bgc_predictor — ESM2 embedding progress: 
-400/606 proteins 2026-03-15 11:05:23 [INFO] pipeline.bgc_predictor — ESM2 embedding progress: 480/606 proteins 2026-03-15 
-11:08:53 [INFO] pipeline.bgc_predictor — ESM2 embedding progress: 560/606 proteins 2026-03-15 11:10:27 [INFO] 
-pipeline.bgc_predictor — ESM2 embedding progress: 606/606 proteins 2026-03-15 11:10:27 [INFO] pipeline.bgc_predictor — 
-Obtained 606 embeddings 2026-03-15 11:10:27 [INFO] pipeline.bgc_predictor — Created 5 windows of 128 genes 2026-03-15 
-11:10:27 [INFO] pipeline.bgc_predictor — Running annotator ... 2026-03-15 11:10:28 [INFO] pipeline.bgc_predictor — Running 
-classifier ... 2026-03-15 11:10:30 [INFO] pipeline.bgc_predictor — Phase 3 | Done in 1388.80s | 0 BGC hits (0.0%) | top 
-class: NonBGC | backend: BGC-Prophet 2026-03-15 11:10:30 [INFO] panadapt_bgc_miner — Generating Phase 3 visualizations ... 
-2026-03-15 11:10:30 [WARNING] pipeline.phase3_visualizer — plot_bgc_class_distribution: no BGC hits — generating empty 
-chart 2026-03-15 11:10:30 [INFO] pipeline.phase3_visualizer — Saved: tests/output/phase3/bgc_class_distribution.png 
-/usr/local/lib/python3.12/dist-packages/seaborn/matrix.py:615: UserWarning: Attempting to set identical low and high xlims 
-makes transformation singular; automatically expanding.
-  ax.set_xlim(0, max_dependent_coord * 1.05) /usr/local/lib/python3.12/dist-packages/seaborn/matrix.py:623: UserWarning: 
-Attempting to set identical low and high ylims makes transformation singular; automatically expanding.
-  ax.set_ylim(0, max_dependent_coord * 1.05) 2026-03-15 11:10:30 [INFO] pipeline.phase3_visualizer — Saved: 
-tests/output/phase3/bgc_heatmap.png 2026-03-15 11:10:31 [INFO] pipeline.phase3_visualizer — Saved: 
-tests/output/phase3/bgc_confidence_landscape.png 2026-03-15 11:10:31 [INFO] pipeline.phase3_visualizer — Phase 3 HTML 
-report written: tests/output/phase3/phase3_report.html 2026-03-15 11:10:31 [INFO] panadapt_bgc_miner — Prediction matrix 
-saved: tests/output/phase3/prediction_matrix.csv 
+  Outputs → tests/output/phase2/
+
+2026-03-15 11:46:54 [INFO] panadapt_bgc_miner — ============================================================
+2026-03-15 11:46:54 [INFO] panadapt_bgc_miner — PHASE 3 — The AI Discoverer (BGC Prediction)
+2026-03-15 11:46:54 [INFO] panadapt_bgc_miner — ============================================================
+2026-03-15 11:46:54 [INFO] pipeline.bgc_predictor — ProphetBackend: using device 'cuda'
+2026-03-15 11:46:54 [INFO] pipeline.bgc_predictor — Loading ESM2 model 'esm2_t30_150M_UR50D' (~150M params, 640-dim embeddings) ...
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor — ESM2 'esm2_t30_150M_UR50D' loaded (148140154 parameters)
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor — Adding linear projection 640-dim → 320-dim for BGC-Prophet compatibility
+--- Logging error ---
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/logging/__init__.py", line 1160, in emit
+    msg = self.format(record)
+          ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/logging/__init__.py", line 999, in format
+    return fmt.format(record)
+           ^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/logging/__init__.py", line 703, in format
+    record.message = record.getMessage()
+                     ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/logging/__init__.py", line 392, in getMessage
+    msg = msg % self.args
+          ~~~~^~~~~~~~~~~
+TypeError: not all arguments converted during string formatting
+Call stack:
+  File "/content/pangenome_miner/main.py", line 339, in <module>
+    main()
+  File "/content/pangenome_miner/main.py", line 333, in main
+    run_phase3(hgt_result, args)
+  File "/content/pangenome_miner/main.py", line 237, in run_phase3
+    predictor = BGCPredictor(seed=42, min_confidence=0.25, use_keyword_boost=True, model_dir=args.model_dir, esm_model_name=args.esm_model, device=args.device)
+  File "/content/pangenome_miner/pipeline/bgc_predictor.py", line 1075, in __init__
+    self._prophet = ProphetBackend(
+  File "/content/pangenome_miner/pipeline/bgc_predictor.py", line 430, in __init__
+    logger.warning(
+Message: '⚠ Projection layer is NOT trained — applying L2 normalisation before '
+Arguments: ('projection and lowering annotator threshold to 0.35 to account for ', "distributional shift.  For best results use 'esm2_t6_8M_UR50D'.")
+/usr/local/lib/python3.12/dist-packages/bgc_prophet/train/model.py:26: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor — BGC-Prophet annotator loaded: /content/pangenome_miner/models/model/annotator.pt
+/usr/local/lib/python3.12/dist-packages/bgc_prophet/train/classifier.py:23: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor — BGC-Prophet classifier loaded: /content/pangenome_miner/models/model/classifier.pt
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor — BGCPredictor: BGC-Prophet backend active (ESM2 'esm2_t30_150M_UR50D' + trained models)
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor — Phase 3 | BGCPredictor | 606 alien genes to score
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor — Phase 3 | Using BGC-Prophet trained model backend
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor — Prophet backend: processing 606 alien genes
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor —   Translated 606/606 genes to protein (0 skipped)
+2026-03-15 11:46:57 [INFO] pipeline.bgc_predictor —   Extracting ESM2 (esm2_t30_150M_UR50D) embeddings ...
+2026-03-15 11:47:01 [INFO] pipeline.bgc_predictor —   ESM2 embedding progress: 80/606 proteins
+2026-03-15 11:47:04 [INFO] pipeline.bgc_predictor —   ESM2 embedding progress: 160/606 proteins
+2026-03-15 11:47:08 [INFO] pipeline.bgc_predictor —   ESM2 embedding progress: 240/606 proteins
+2026-03-15 11:47:11 [INFO] pipeline.bgc_predictor —   ESM2 embedding progress: 320/606 proteins
+2026-03-15 11:47:15 [INFO] pipeline.bgc_predictor —   ESM2 embedding progress: 400/606 proteins
+2026-03-15 11:47:18 [INFO] pipeline.bgc_predictor —   ESM2 embedding progress: 480/606 proteins
+2026-03-15 11:47:22 [INFO] pipeline.bgc_predictor —   ESM2 embedding progress: 560/606 proteins
+2026-03-15 11:47:24 [INFO] pipeline.bgc_predictor —   ESM2 embedding progress: 606/606 proteins
+2026-03-15 11:47:24 [INFO] pipeline.bgc_predictor —   Obtained 606 embeddings
+2026-03-15 11:47:24 [INFO] pipeline.bgc_predictor —   Created 5 windows of 128 genes
+2026-03-15 11:47:24 [INFO] pipeline.bgc_predictor —   Running annotator ...
+2026-03-15 11:47:24 [INFO] pipeline.bgc_predictor —   Running classifier ...
+2026-03-15 11:47:24 [INFO] pipeline.bgc_predictor — Phase 3 | Done in 27.84s | 0 BGC hits (0.0%) | top class: NonBGC | backend: BGC-Prophet
+2026-03-15 11:47:24 [INFO] panadapt_bgc_miner — Generating Phase 3 visualizations ...
+2026-03-15 11:47:24 [WARNING] pipeline.phase3_visualizer — plot_bgc_class_distribution: no BGC hits — generating empty chart
+2026-03-15 11:47:25 [INFO] pipeline.phase3_visualizer —   Saved: tests/output/phase3/bgc_class_distribution.png
+/usr/local/lib/python3.12/dist-packages/seaborn/matrix.py:615: UserWarning: Attempting to set identical low and high xlims makes transformation singular; automatically expanding.
+  ax.set_xlim(0, max_dependent_coord * 1.05)
+/usr/local/lib/python3.12/dist-packages/seaborn/matrix.py:623: UserWarning: Attempting to set identical low and high ylims makes transformation singular; automatically expanding.
+  ax.set_ylim(0, max_dependent_coord * 1.05)
+2026-03-15 11:47:25 [INFO] pipeline.phase3_visualizer —   Saved: tests/output/phase3/bgc_heatmap.png
+2026-03-15 11:47:25 [INFO] pipeline.phase3_visualizer —   Saved: tests/output/phase3/bgc_confidence_landscape.png
+2026-03-15 11:47:25 [INFO] pipeline.phase3_visualizer — Phase 3 HTML report written: tests/output/phase3/phase3_report.html
+2026-03-15 11:47:25 [INFO] panadapt_bgc_miner — Prediction matrix saved: tests/output/phase3/prediction_matrix.csv
+
 ───────────────────────────────────────────────────────
-  Phase 3 Summary 
+  Phase 3 Summary
 ───────────────────────────────────────────────────────
-  Alien genes scored : 606 BGC hits : 0 (0.0%) High-confidence hits : 0 Top BGC class : NonBGC Inference engine : 
-  BGC-Prophet ESM2 model : esm2_t30_150M_UR50D Outputs → tests/output/phase3/
-2026-03-15 11:10:31 [INFO] panadapt_bgc_miner — Pipeline complete. All outputs in: tests/output
+  Alien genes scored    : 606
+  BGC hits              : 0 (0.0%)
+  High-confidence hits  : 0
+  Top BGC class         : NonBGC
+  Inference engine      : BGC-Prophet
+  ESM2 model            : esm2_t30_150M_UR50D
+  Device                : cuda
+  Outputs → tests/output/phase3/
+
+2026-03-15 11:47:25 [INFO] panadapt_bgc_miner — Pipeline complete. All outputs in: tests/output

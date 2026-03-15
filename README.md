@@ -360,6 +360,96 @@ result = predictor.run(hgt_result)
 
 ---
 
+## Training Custom BGC-Prophet Models
+
+By default, BGC-Prophet ships with weights trained on ESM2-8M (320-dim embeddings).
+When using larger ESM2 models (35M, 150M, 650M), the pipeline falls back to PCA projection,
+which works but loses some representation quality. For best results, train model-specific
+weights using `train_prophet.py`.
+
+### Prerequisites
+
+- Python 3.9+
+- GPU recommended (NVIDIA with CUDA, or Apple Silicon with MPS)
+- Internet connection (downloads [MIBiG v3.1](https://mibig.secondarymetabolites.org/) on first run)
+- ~2 GB disk space for MIBiG data + ESM2 embeddings cache
+
+### Quick Start
+
+```bash
+# Train for a specific ESM2 model size
+python train_prophet.py --esm-model esm2_t30_150M_UR50D --device auto
+```
+
+### Train All Model Sizes
+
+```bash
+for model in esm2_t6_8M_UR50D esm2_t12_35M_UR50D esm2_t30_150M_UR50D esm2_t33_650M_UR50D; do
+    echo "=== Training $model ==="
+    python train_prophet.py --esm-model "$model" --epochs 50 --device auto
+done
+```
+
+### Google Colab
+
+```python
+!pip install fair-esm bgc-prophet
+!python train_prophet.py --esm-model esm2_t30_150M_UR50D --device auto --epochs 50
+```
+
+### CLI Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--esm-model` | `esm2_t6_8M_UR50D` | ESM2 model variant to train for |
+| `--data-dir` | `data/training` | Directory for MIBiG data and embedding cache |
+| `--output-dir` | `models/model` | Output directory for trained weights |
+| `--epochs` | `50` | Number of training epochs |
+| `--batch-size` | `16` | Training batch size |
+| `--lr` | `1e-4` | Learning rate (AdamW) |
+| `--device` | `auto` | Device selection (`auto` / `cuda` / `mps` / `cpu`) |
+| `--val-split` | `0.1` | Fraction of data used for validation |
+| `--num-negatives` | `2000` | Number of synthetic negative training examples |
+| `--seed` | `42` | Random seed for reproducibility |
+
+### Output Structure
+
+```
+models/model/
+├── annotator.pt                    # Default 8M weights (shipped)
+├── classifier.pt                   # Default 8M weights (shipped)
+├── esm2_t6_8M_UR50D/              # Retrained 8M
+│   ├── annotator.pt
+│   ├── classifier.pt
+│   └── training_meta.json
+├── esm2_t30_150M_UR50D/            # 150M model (640-dim)
+│   ├── annotator.pt
+│   ├── classifier.pt
+│   └── training_meta.json
+└── esm2_t33_650M_UR50D/            # 650M model (1280-dim)
+    ├── annotator.pt
+    ├── classifier.pt
+    └── training_meta.json
+```
+
+### Using Trained Models
+
+After training, the pipeline **auto-detects** model-specific weights — no configuration needed:
+
+```bash
+python main.py \
+    --genomes data/genomes \
+    --annotations data/annotations \
+    --output results \
+    --esm-model esm2_t30_150M_UR50D
+```
+
+When model-specific weights exist at `models/model/{esm_model_name}/`, the pipeline:
+- Loads native-dimension weights directly (e.g., 640-dim for 150M)
+- Skips PCA projection entirely
+- Uses the standard annotator threshold (0.5) instead of the lowered PCA threshold (0.35)
+
+
 ## Output Files
 
 ```
