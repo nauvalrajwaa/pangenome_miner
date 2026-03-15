@@ -1,0 +1,11 @@
+3c8e89ab06f1f3aac8b95d86f0de1d44  ncbi_dataset/data/assembly_data_report.jsonl
+5e77a05eab1d07d9fd75bbbeb127d509  ncbi_dataset/data/GCA_000820785.2/GCA_000820785.2_Streptomyces_massiliensis_AP10_genomic.fna
+76f7679ef04391165c971a853ffa6134  ncbi_dataset/data/GCA_014648775.1/GCA_014648775.1_ASM1464877v1_genomic.fna
+ed738d0bc496b48bdb3f5bcfd9189826  ncbi_dataset/data/GCA_014648775.1/genomic.gff
+df6fa3eb64b3ca0e11f9325f1a7e6690  ncbi_dataset/data/GCA_040631555.1/GCA_040631555.1_ASM4063155v1_genomic.fna
+f526a6f7ade1de81db41e796a0d3f98e  ncbi_dataset/data/GCA_040631555.1/genomic.gff
+4d2e685e66f06bb0d32f22b550617ebe  ncbi_dataset/data/GCA_040631735.1/GCA_040631735.1_ASM4063173v1_genomic.fna
+428a6dbedf45fd265e38c9a357e92880  ncbi_dataset/data/GCA_040631735.1/genomic.gff
+e5b81548b04531054b09a2429a2bd85e  ncbi_dataset/data/GCA_040650195.1/GCA_040650195.1_ASM4065019v1_genomic.fna
+b6ea7930ad8b45d4b99779ecf78ed663  ncbi_dataset/data/GCA_040650195.1/genomic.gff
+0f7e9323c4aaeb287451b1c94a9e9f52  ncbi_dataset/data/dataset_catalog.json

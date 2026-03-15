@@ -24,6 +24,24 @@ import sys
 from pathlib import Path
 
 from pipeline.pangenome_miner import PangenomeMiner, PangenomeResult
+from pipeline.phase1_visualizer import (
+    plot_presence_absence_heatmap,
+    plot_pangenome_summary,
+    render_phase1_html_report,
+)
+from pipeline.hgt_detective import HGTDetective, HGTResult
+from pipeline.phase2_visualizer import (
+    plot_genomic_island_architecture,
+    plot_hgt_feature_distributions,
+    render_phase2_html_report,
+)
+from pipeline.bgc_predictor import BGCPredictor, BGCResult
+from pipeline.phase3_visualizer import (
+    plot_bgc_class_distribution,
+    plot_bgc_heatmap,
+    plot_bgc_confidence_landscape,
+    render_phase3_html_report,
+)
 
 logger = logging.getLogger("panadapt_bgc_miner")
 
@@ -79,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 # Phase 1 runner
 # ---------------------------------------------------------------------------
-def run_phase1(args: argparse.Namespace) -> PangenomeResult:
+def run_phase1(args: argparse.Namespace) -> tuple[PangenomeResult, PangenomeMiner]:
     logger.info("=" * 60)
     logger.info("PHASE 1 — The Comparatist Engine (Pangenome Analysis)")
     logger.info("=" * 60)
@@ -92,11 +110,32 @@ def run_phase1(args: argparse.Namespace) -> PangenomeResult:
 
     result: PangenomeResult = miner.run(args.genomes, args.annotations)
 
-    # Persist matrix for downstream inspection
+    # Persist matrix
     matrix_out = args.output / "phase1_presence_absence_matrix.csv"
     miner.save_matrix(matrix_out)
 
-    # Summary print
+    # Phase 1 Visualizations
+    logger.info("Generating Phase 1 visualizations …")
+    p1_dir = args.output / "phase1"
+    p1_dir.mkdir(parents=True, exist_ok=True)
+
+    heatmap_path = plot_presence_absence_heatmap(
+        result.presence_absence_matrix,
+        output_path=p1_dir / "presence_absence_heatmap.png",
+    )
+    summary_chart_path = plot_pangenome_summary(
+        result.stats,
+        output_path=p1_dir / "pangenome_summary.png",
+    )
+    html_path = render_phase1_html_report(
+        stats=result.stats,
+        strain_ids=result.strain_ids,
+        accessory_records=result.accessory_records,
+        heatmap_path=heatmap_path,
+        summary_chart_path=summary_chart_path,
+        output_path=p1_dir / "phase1_report.html",
+    )
+
     stats = result.stats
     print(
         f"\n{'─' * 55}\n"
@@ -109,34 +148,120 @@ def run_phase1(args: argparse.Namespace) -> PangenomeResult:
         f"  Accessory genome   : {stats['n_accessory']} clusters "
         f"({stats['n_accessory_records']} individual genes)\n"
         f"{'─' * 55}\n"
-        f"  Matrix saved → {matrix_out}\n"
+        f"  Outputs → {p1_dir}/\n"
     )
-    return result
+    return result, miner
 
 
 # ---------------------------------------------------------------------------
 # Phase 2 stub
 # ---------------------------------------------------------------------------
-def run_phase2(phase1_result: PangenomeResult, args: argparse.Namespace) -> None:
+def run_phase2(phase1_result: PangenomeResult, miner: PangenomeMiner, args: argparse.Namespace) -> HGTResult:
     logger.info("=" * 60)
-    logger.info("PHASE 2 — The HGT Detective (placeholder — coming soon)")
+    logger.info("PHASE 2 — The HGT Detective")
     logger.info("=" * 60)
-    logger.info(
-        "Will analyse %d accessory gene records for HGT signatures …",
-        len(phase1_result.accessory_records),
+
+    detective = HGTDetective(contamination=0.30, n_estimators=200)
+    hgt_result = detective.run(phase1_result=phase1_result, fasta_store=miner._fasta_store)
+
+    # Phase 2 Visualizations
+    logger.info("Generating Phase 2 visualizations …")
+    p2_dir = args.output / "phase2"
+    p2_dir.mkdir(parents=True, exist_ok=True)
+
+    genomic_plot_paths = {}
+    for strain_id in phase1_result.strain_ids:
+        safe_name = strain_id.replace('/', '_').replace(' ', '_')
+        plot_path = plot_genomic_island_architecture(
+            hgt_result=hgt_result,
+            strain_id=strain_id,
+            output_path=p2_dir / f"genomic_island_{safe_name}.png",
+        )
+        if plot_path:
+            genomic_plot_paths[strain_id] = plot_path
+
+    feat_dist_path = plot_hgt_feature_distributions(
+        hgt_result=hgt_result,
+        output_path=p2_dir / "hgt_feature_distributions.png",
     )
-    # TODO: Import and call HGTDetective(phase1_result).run()
+
+    p2_html = render_phase2_html_report(
+        hgt_result=hgt_result,
+        genomic_plot_paths=genomic_plot_paths,
+        feature_dist_path=feat_dist_path,
+        output_path=p2_dir / "phase2_report.html",
+    )
+
+    stats = hgt_result.stats
+    print(
+        f"\n{'─' * 55}\n"
+        f"  Phase 2 Summary\n"
+        f"{'─' * 55}\n"
+        f"  Accessory genes analysed  : {stats['n_accessory_input']}\n"
+        f"  Alien HGT regions flagged : {stats['n_alien_hgt']} ({stats['hgt_fraction']:.1%})\n"
+        f"  MGE-proximal genes        : {stats['n_mge_proximal']}\n"
+        f"{'─' * 55}\n"
+        f"  Outputs → {p2_dir}/\n"
+    )
+    return hgt_result
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 stub
+# Phase 3
 # ---------------------------------------------------------------------------
-def run_phase3(args: argparse.Namespace) -> None:
+def run_phase3(hgt_result: HGTResult, args: argparse.Namespace) -> BGCResult:
     logger.info("=" * 60)
-    logger.info("PHASE 3 — The AI Discoverer (placeholder — coming soon)")
+    logger.info("PHASE 3 — The AI Discoverer (BGC Prediction)")
     logger.info("=" * 60)
-    # TODO: Import and call BGCPredictor(hgt_result).run()
 
+    predictor = BGCPredictor(seed=42, min_confidence=0.25, use_keyword_boost=True)
+    bgc_result = predictor.run(hgt_result)
+
+    # Phase 3 Visualizations
+    logger.info("Generating Phase 3 visualizations ...")
+    p3_dir = args.output / "phase3"
+    p3_dir.mkdir(parents=True, exist_ok=True)
+
+    dist_path = plot_bgc_class_distribution(
+        bgc_result=bgc_result,
+        output_dir=str(p3_dir),
+    )
+    heatmap_path = plot_bgc_heatmap(
+        bgc_result=bgc_result,
+        output_dir=str(p3_dir),
+    )
+    landscape_path = plot_bgc_confidence_landscape(
+        bgc_result=bgc_result,
+        output_dir=str(p3_dir),
+    )
+    render_phase3_html_report(
+        bgc_result=bgc_result,
+        output_dir=str(p3_dir),
+        plot_distribution_path=dist_path,
+        plot_heatmap_path=heatmap_path,
+        plot_landscape_path=landscape_path,
+    )
+
+    # Export prediction matrix
+    if not bgc_result.prediction_matrix.empty:
+        pred_csv = p3_dir / "prediction_matrix.csv"
+        bgc_result.prediction_matrix.to_csv(pred_csv, index=False)
+        logger.info("Prediction matrix saved: %s", pred_csv)
+
+    stats = bgc_result.stats
+    print(
+        f"\n{'─' * 55}\n"
+        f"  Phase 3 Summary\n"
+        f"{'─' * 55}\n"
+        f"  Alien genes scored    : {stats.get('n_alien_scored', 0)}\n"
+        f"  BGC hits              : {stats.get('n_bgc_hits', 0)} ({stats.get('bgc_hit_rate', 0):.1%})\n"
+        f"  High-confidence hits  : {stats.get('n_high_confidence', 0)}\n"
+        f"  Top BGC class         : {stats.get('top_class', 'N/A')}\n"
+        f"  Inference engine      : {'PyTorch' if stats.get('torch_used') else 'NumPy mock'}\n"
+        f"{'─' * 55}\n"
+        f"  Outputs → {p3_dir}/\n"
+    )
+    return bgc_result
 
 # ---------------------------------------------------------------------------
 # Mock data helper
@@ -182,10 +307,9 @@ def main() -> None:
     if args.mock:
         prepare_mock_data(args)
 
-    # --- Run pipeline phases ---
-    phase1_result = run_phase1(args)
-    run_phase2(phase1_result, args)
-    run_phase3(args)
+    phase1_result, miner = run_phase1(args)
+    hgt_result = run_phase2(phase1_result, miner, args)
+    run_phase3(hgt_result, args)
 
     logger.info("Pipeline complete. All outputs in: %s", args.output)
 

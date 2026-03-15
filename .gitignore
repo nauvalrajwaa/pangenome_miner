@@ -1,0 +1,128 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.pyo
+
+# Distribution / packaging
+.Python
+build/
+dist/
+wheels/
+*.egg-info/
+.eggs/
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.conda/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ─── Testing ──────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.coveragerc
+nosetests.xml
+coverage.xml
+*.lcov
+junit*.xml
+
+# ─── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ─── Type checking ────────────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+pyrightconfig.json
+
+# ─── Pipeline output ──────────────────────────────────────────────────────────
+# Generated artefacts — never commit, always re-run the pipeline
+output/
+tests/output/
+
+# ─── Large data files ─────────────────────────────────────────────────────────
+# Genome assemblies & annotations (typically hundreds of MB)
+# Comment out these lines if you want to track small test fixtures in git
+tests/real_data/genomes/*.fna
+tests/real_data/genomes/*.fasta
+tests/real_data/genomes/*.fa
+tests/real_data/annotations/*.gff
+tests/real_data/annotations/*.gff3
+
+# Other common sequence data formats
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.bam.bai
+*.sam
+*.vcf
+*.vcf.gz
+*.bcf
+
+# ─── Trained model weights ────────────────────────────────────────────────────
+# PyTorch checkpoints can be very large — host on Zenodo / HuggingFace Hub
+models/*.pth
+models/*.pt
+models/*.ckpt
+models/*.bin
+models/*.safetensors
+
+# ─── IDEs ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# ─── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.VolumeIcon.icns
+
+# ─── Linux ────────────────────────────────────────────────────────────────────
+*~
+.nfs*
+
+# ─── Windows ──────────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ─── Secrets / credentials ────────────────────────────────────────────────────
+.env
+.env.*
+*.key
+*.pem
+secrets.yaml
+secrets.json
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+*.orig
+.sisyphus/

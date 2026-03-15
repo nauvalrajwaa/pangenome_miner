@@ -1,0 +1,77 @@
+{
+"apiVersion": "V2",
+"assemblies": [
+{
+  "files": [
+    {
+      "filePath": "assembly_data_report.jsonl",
+      "fileType": "DATA_REPORT",
+      "uncompressedLengthBytes": "19702"
+    }
+  ]
+},{
+  "accession": "GCA_000820785.2",
+  "files": [
+    {
+      "filePath": "GCA_000820785.2/GCA_000820785.2_Streptomyces_massiliensis_AP10_genomic.fna",
+      "fileType": "GENOMIC_NUCLEOTIDE_FASTA",
+      "uncompressedLengthBytes": "7520617"
+    }
+  ]
+},{
+  "accession": "GCA_014648775.1",
+  "files": [
+    {
+      "filePath": "GCA_014648775.1/GCA_014648775.1_ASM1464877v1_genomic.fna",
+      "fileType": "GENOMIC_NUCLEOTIDE_FASTA",
+      "uncompressedLengthBytes": "7091274"
+    },
+    {
+      "filePath": "GCA_014648775.1/genomic.gff",
+      "fileType": "GFF3",
+      "uncompressedLengthBytes": "2966490"
+    }
+  ]
+},{
+  "accession": "GCA_040631555.1",
+  "files": [
+    {
+      "filePath": "GCA_040631555.1/GCA_040631555.1_ASM4063155v1_genomic.fna",
+      "fileType": "GENOMIC_NUCLEOTIDE_FASTA",
+      "uncompressedLengthBytes": "7860873"
+    },
+    {
+      "filePath": "GCA_040631555.1/genomic.gff",
+      "fileType": "GFF3",
+      "uncompressedLengthBytes": "3830011"
+    }
+  ]
+},{
+  "accession": "GCA_040631735.1",
+  "files": [
+    {
+      "filePath": "GCA_040631735.1/GCA_040631735.1_ASM4063173v1_genomic.fna",
+      "fileType": "GENOMIC_NUCLEOTIDE_FASTA",
+      "uncompressedLengthBytes": "7572634"
+    },
+    {
+      "filePath": "GCA_040631735.1/genomic.gff",
+      "fileType": "GFF3",
+      "uncompressedLengthBytes": "3696994"
+    }
+  ]
+},{
+  "accession": "GCA_040650195.1",
+  "files": [
+    {
+      "filePath": "GCA_040650195.1/GCA_040650195.1_ASM4065019v1_genomic.fna",
+      "fileType": "GENOMIC_NUCLEOTIDE_FASTA",
+      "uncompressedLengthBytes": "7458874"
+    },
+    {
+      "filePath": "GCA_040650195.1/genomic.gff",
+      "fileType": "GFF3",
+      "uncompressedLengthBytes": "3604150"
+    }
+  ]
+}]}

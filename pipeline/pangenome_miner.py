@@ -513,22 +513,33 @@ class PangenomeMiner:
         n_strains = len(self._strain_ids)
         fraction_present = self._matrix.sum(axis=1) / n_strains
 
+        # With small strain counts the fixed accessory_threshold can be unreachable
+        # (e.g. 10% of 5 strains = 0.5, so nothing qualifies as accessory).
+        # Effective threshold: at least 1 strain worth of presence, i.e. 1/n_strains.
+        effective_acc = max(self.accessory_threshold, 1.0 / n_strains)
+        if effective_acc > self.accessory_threshold:
+            logger.info(
+                "accessory_threshold %.2f adjusted to %.2f (= 1/%d strains) ",
+                self.accessory_threshold, effective_acc, n_strains,
+            )
+
         core_genes = self._matrix.index[fraction_present >= self.core_threshold]
-        accessory_genes = self._matrix.index[fraction_present <= self.accessory_threshold]
+        accessory_genes = self._matrix.index[fraction_present <= effective_acc]
         shell_genes = self._matrix.index[
-            (fraction_present > self.accessory_threshold)
+            (fraction_present > effective_acc)
             & (fraction_present < self.core_threshold)
         ]
 
         logger.info(
-            "Pangenome partitioning (%d strains):\n"
+            "Pangenome partitioning (%d strains, accessory ≤ %.0f%%):\n"
             "  Core       (≥%.0f%%): %5d clusters\n"
             "  Shell                : %5d clusters\n"
             "  Accessory  (≤%.0f%%): %5d clusters",
             n_strains,
+            effective_acc * 100,
             self.core_threshold * 100, len(core_genes),
             len(shell_genes),
-            self.accessory_threshold * 100, len(accessory_genes),
+            effective_acc * 100, len(accessory_genes),
         )
         return core_genes, accessory_genes, shell_genes
 
