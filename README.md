@@ -100,7 +100,7 @@ It ingests raw genome assemblies (FASTA) and their NCBI PGAP or Prokka annotatio
 ║    └── "Isolation Forest anomaly"  if IsolationForest label == −1      ║
 ║                                                                         ║
 ║  Outputs:  HGTResult dataclass → alien_records passed to Phase 3       ║
-║            phase2/genomic_island_<strain>.png  (one per strain)        ║
+║            phase2/genomic_island_<strain>.png  (gene map + evidence)   ║
 ║            phase2/hgt_feature_distributions.png                        ║
 ║            phase2/phase2_report.html                                   ║
 ╚══════════════════════════════╤══════════════════════════════════════════╝
@@ -131,6 +131,8 @@ It ingests raw genome assemblies (FASTA) and their NCBI PGAP or Prokka annotatio
 ║    └── Product annotation keywords boost matching class scores          ║
 ║                                                                         ║
 ║  Outputs:  BGCResult dataclass                                          ║
+║            phase3/bgc_decision_funnel.png                              ║
+║            phase3/bgc_neighborhood_map.png                             ║
 ║            phase3/bgc_class_distribution.png                           ║
 ║            phase3/bgc_heatmap.png          (strain × BGC class)        ║
 ║            phase3/bgc_confidence_landscape.png                         ║
@@ -148,10 +150,12 @@ It ingests raw genome assemblies (FASTA) and their NCBI PGAP or Prokka annotatio
 │  │   ├── pangenome_summary.png                                          │
 │  │   └── phase1_report.html                                             │
 │  ├── phase2/                                                            │
-│  │   ├── genomic_island_<strain>.png  (×N strains)                     │
+│  │   ├── genomic_island_<strain>.png  (×N strains; genes + evidence)   │
 │  │   ├── hgt_feature_distributions.png                                  │
 │  │   └── phase2_report.html                                             │
 │  └── phase3/                                                            │
+│      ├── bgc_decision_funnel.png                                        │
+│      ├── bgc_neighborhood_map.png                                       │
 │      ├── bgc_class_distribution.png                                     │
 │      ├── bgc_heatmap.png                                                │
 │      ├── bgc_confidence_landscape.png                                   │
@@ -392,7 +396,7 @@ their own BGC-Prophet weights at the native embedding dimension.
 
 | ESM2 Model | Embed Dim | nhead | Needs training? |
 |------------|-----------|-------|-----------------|
-| `esm2_t6_8M_UR50D` (default) | 320 | 3 | **No** — official weights included |
+| `esm2_t6_8M_UR50D` (default) | 320 | 5 | **No** — official weights included |
 | `esm2_t12_35M_UR50D` | 480 | 5 | Yes — seed or train |
 | `esm2_t30_150M_UR50D` | 640 | 5 | Yes — seed or train |
 | `esm2_t33_650M_UR50D` | 1280 | 5 | Yes — seed or train |
@@ -476,7 +480,7 @@ done
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--esm-model` | `esm2_t6_8M_UR50D` | ESM2 model variant to train for |
+| `--esm-model` | `esm2_t12_35M_UR50D` | ESM2 model variant to train for |
 | `--data-dir` | `data/training` | Directory for MIBiG data and embedding cache |
 | `--output-dir` | `models/model` | Output directory for trained weights |
 | `--epochs` | `50` | Number of training epochs |
@@ -533,10 +537,12 @@ output/
 │   ├── pangenome_summary.png            # stacked bar (core/shell/accessory) + stats
 │   └── phase1_report.html              # self-contained HTML report
 ├── phase2/
-│   ├── genomic_island_<strain>.png      # linear map of each strain's alien genes
+│   ├── genomic_island_<strain>.png      # alien gene map with anomaly / GC / k-mer evidence
 │   ├── hgt_feature_distributions.png   # 4-panel feature distribution plots
 │   └── phase2_report.html              # HTML report with HGT table + plots
 └── phase3/
+    ├── bgc_decision_funnel.png         # accessory -> alien HGT -> BGC hit funnel
+    ├── bgc_neighborhood_map.png        # top hit-rich contigs with local BGC clustering
     ├── bgc_class_distribution.png       # bar chart of BGC class counts
     ├── bgc_heatmap.png                  # per-strain × BGC class heatmap
     ├── bgc_confidence_landscape.png     # anomaly score vs BGC confidence scatter
@@ -765,9 +771,9 @@ proj_6_magsanalysis/
 │   ├── pangenome_miner.py         # Phase 1 — ortholog clustering & pangenome partition
 │   ├── phase1_visualizer.py       # Phase 1 — heatmap, summary plot, HTML report
 │   ├── hgt_detective.py           # Phase 2 — HGT scoring & Isolation Forest
-│   ├── phase2_visualizer.py       # Phase 2 — genomic island map, distributions, HTML
+│   ├── phase2_visualizer.py       # Phase 2 — genomic island evidence map, distributions, HTML
 │   ├── bgc_predictor.py           # Phase 3 — BGC-Prophet AI predictor (ESM2 + TransformerEncoder)
-│   └── phase3_visualizer.py       # Phase 3 — class distribution, heatmap, HTML
+│   └── phase3_visualizer.py       # Phase 3 — funnel, neighborhood map, class plots, HTML
 │
 ├── models/
 │   └── model/
