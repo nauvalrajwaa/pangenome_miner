@@ -89,6 +89,8 @@ ESM2_MAX_SEQ_LEN: int = 1022
 MIBIG_URL: str = "https://dl.secondarymetabolites.org/mibig/mibig_json_3.1.tar.gz"
 MIBIG_TARBALL: str = "mibig_json_3.1.tar.gz"
 
+MIBIG_FASTA_URL: str = "https://dl.secondarymetabolites.org/mibig/mibig_prot_seqs_3.1.fasta"
+MIBIG_FASTA_FILE: str = "mibig_prot_seqs_3.1.fasta"
 # Amino acid frequencies (natural, for generating realistic negative sequences)
 _AA_ALPHABET: str = "ACDEFGHIKLMNPQRSTVWY"
 _AA_FREQUENCIES: List[float] = [
@@ -187,12 +189,105 @@ def _find_mibig_json_dir(data_dir: Path) -> Optional[Path]:
     return None
 
 
-def parse_mibig_entries(json_dir: Path) -> List[BGCEntry]:
+def download_mibig_fasta(data_dir: Path, max_retries: int = 3) -> Path:
+    """Download the MIBiG v3.1 proteins FASTA file.
+
+    MIBiG v3.1 JSON files do not contain protein sequences; sequences are
+    distributed as a separate FASTA file at MIBIG_FASTA_URL.
+
+    Returns path to the local FASTA file.
+    """
+    data_dir.mkdir(parents=True, exist_ok=True)
+    fasta_path = data_dir / MIBIG_FASTA_FILE
+
+    if fasta_path.exists():
+        logger.info("MIBiG FASTA already cached at %s", fasta_path)
+        return fasta_path
+
+    logger.info("Downloading MIBiG proteins FASTA from %s ...", MIBIG_FASTA_URL)
+    for attempt in range(1, max_retries + 1):
+        try:
+            urllib.request.urlretrieve(MIBIG_FASTA_URL, str(fasta_path))
+            logger.info("Download complete (%s).", fasta_path)
+            return fasta_path
+        except Exception as exc:
+            logger.warning("Download attempt %d/%d failed: %s", attempt, max_retries, exc)
+            if attempt == max_retries:
+                raise RuntimeError(
+                    f"Failed to download MIBiG FASTA after {max_retries} attempts"
+                ) from exc
+            time.sleep(2 ** attempt)
+
+    # Unreachable but satisfies type checker
+    return fasta_path
+
+
+def parse_mibig_fasta(fasta_path: Path) -> Dict[str, List[str]]:
+    """Parse the MIBiG proteins FASTA into a BGC-ID → sequences mapping.
+
+    MIBiG v3.1 FASTA headers have the format:
+        >BGC0000001|c1|1-1083|+|AEK75490.1|protein_methyltransferase|AEK75490.1
+    where field[0] (pipe-separated) is the BGC accession.
+
+    Returns:
+        Dict mapping each BGC ID to its list of protein sequences.
+    """
+    protein_map: Dict[str, List[str]] = {}
+    current_bgc: Optional[str] = None
+    current_seq_parts: List[str] = []
+
+    logger.info("Parsing MIBiG FASTA %s ...", fasta_path.name)
+
+    with open(fasta_path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                # Flush previous sequence
+                if current_bgc is not None and current_seq_parts:
+                    seq = "".join(current_seq_parts).upper().rstrip("*")
+                    if len(seq) >= 10:
+                        protein_map.setdefault(current_bgc, []).append(seq)
+                # Parse new header: >BGC0000001|c1|...
+                header = line[1:]  # strip '>'
+                fields = header.split("|")
+                current_bgc = fields[0].strip() if fields else None
+                current_seq_parts = []
+            else:
+                current_seq_parts.append(line)
+
+    # Flush last sequence
+    if current_bgc is not None and current_seq_parts:
+        seq = "".join(current_seq_parts).upper().rstrip("*")
+        if len(seq) >= 10:
+            protein_map.setdefault(current_bgc, []).append(seq)
+
+    total_proteins = sum(len(v) for v in protein_map.values())
+    logger.info(
+        "Loaded %d proteins across %d BGC clusters from FASTA.",
+        total_proteins, len(protein_map),
+    )
+    return protein_map
+
+
+def parse_mibig_entries(
+    json_dir: Path,
+    protein_map: Dict[str, List[str]],
+) -> List[BGCEntry]:
     """Parse MIBiG JSON files into BGCEntry objects.
 
-    Each JSON file represents one BGC cluster. We extract protein sequences
-    from the ``genes`` section and map biosynthetic classes to our 7-label
-    scheme.
+    Biosynthetic class information comes from the JSON files; protein
+    sequences come from the pre-built ``protein_map`` (parsed from the
+    MIBiG proteins FASTA, since v3.1 JSONs do not embed sequences).
+
+    Args:
+        json_dir:    Directory containing MIBiG *.json files.
+        protein_map: Dict mapping BGC ID → list of protein sequences,
+                     as returned by :func:`parse_mibig_fasta`.
+
+    Returns:
+        List of :class:`BGCEntry` objects with sequences attached.
     """
     entries: List[BGCEntry] = []
     json_files = sorted(json_dir.glob("*.json"))
@@ -208,16 +303,36 @@ def parse_mibig_entries(json_dir: Path) -> List[BGCEntry]:
             skipped += 1
             continue
 
-        # Navigate MIBiG JSON structure
-        cluster = data.get("cluster", data)  # v3.x uses top-level "cluster"
+        # Navigate MIBiG JSON structure (v3.x wraps everything under 'cluster')
+        cluster = data.get("cluster", data)
         bgc_id = cluster.get("mibig_accession", jf.stem)
+
+        # Look up protein sequences from FASTA-derived map
+        proteins = protein_map.get(bgc_id, [])
+        if not proteins:
+            # No proteins in FASTA for this BGC — skip
+            skipped += 1
+            continue
+
+        # Sanitize sequences: remove non-standard AAs, enforce minimum length
+        clean_proteins: List[str] = []
+        for seq in proteins:
+            seq = seq.strip().rstrip("*").upper()
+            if not all(c in _AA_ALPHABET for c in seq):
+                seq = "".join(c for c in seq if c in _AA_ALPHABET)
+            if len(seq) >= 10:
+                clean_proteins.append(seq)
+
+        if not clean_proteins:
+            skipped += 1
+            continue
 
         # Extract biosynthetic classes
         raw_classes = cluster.get("biosyn_class", [])
         if isinstance(raw_classes, str):
             raw_classes = [raw_classes]
 
-        norm_classes = []
+        norm_classes: List[str] = []
         for rc in raw_classes:
             normalized = _MIBIG_CLASS_NORMALIZE.get(rc, None)
             if normalized is None:
@@ -239,40 +354,26 @@ def parse_mibig_entries(json_dir: Path) -> List[BGCEntry]:
             idx = BGC_CLASS_MAP.get(nc, BGC_CLASS_MAP["Other"])
             class_vec[idx] = 1.0
 
-        # Extract protein sequences from genes
-        proteins: List[str] = []
-        protein_ids: List[str] = []
-        genes = cluster.get("genes", {})
-
-        # MIBiG v3.x: genes.annotations is a list of gene dicts
-        gene_list = genes.get("annotations", []) if isinstance(genes, dict) else []
-
-        for gi, gene in enumerate(gene_list):
-            # Prefer translation, then protein_sequence
-            seq = gene.get("translation", gene.get("protein_sequence", ""))
-            if not seq or len(seq) < 10:
-                continue
-            # Clean sequence: strip stop codons, whitespace
-            seq = seq.strip().rstrip("*")
-            if not all(c in _AA_ALPHABET for c in seq.upper()):
-                # Filter sequences with non-standard amino acids
-                seq = "".join(c for c in seq.upper() if c in _AA_ALPHABET)
-                if len(seq) < 10:
-                    continue
-            gene_id = gene.get("id", gene.get("name", f"{bgc_id}_gene_{gi}"))
-            proteins.append(seq.upper())
-            protein_ids.append(gene_id)
-
-        if not proteins:
-            # No protein sequences in gene annotations — skip this entry
-            skipped += 1
-            continue
+        # Use BGC accession IDs as protein identifiers where available;
+        # fall back to positional IDs if the FASTA had no per-protein IDs.
+        gene_list = cluster.get("genes", {}).get("annotations", [])
+        gene_ids = [
+            g.get("id", g.get("name", f"{bgc_id}_gene_{i}"))
+            for i, g in enumerate(gene_list)
+        ]
+        # Pad or trim gene_ids to match clean_proteins length
+        if len(gene_ids) < len(clean_proteins):
+            gene_ids += [
+                f"{bgc_id}_prot_{i}"
+                for i in range(len(gene_ids), len(clean_proteins))
+            ]
+        protein_ids = gene_ids[: len(clean_proteins)]
 
         entries.append(BGCEntry(
             bgc_id=bgc_id,
             biosyn_classes=norm_classes,
             class_vector=class_vec,
-            protein_sequences=proteins,
+            protein_sequences=clean_proteins,
             protein_ids=protein_ids,
         ))
 
@@ -889,7 +990,14 @@ def main(args: argparse.Namespace) -> None:
     logger.info("-" * 60)
 
     json_dir = download_mibig(data_dir)
-    bgc_entries = parse_mibig_entries(json_dir)
+    fasta_path = download_mibig_fasta(data_dir)
+    protein_map = parse_mibig_fasta(fasta_path)
+    bgc_entries = parse_mibig_entries(json_dir, protein_map)
+
+    # Optionally slice dataset for fast smoke-testing / quick iteration
+    if args.max_entries and args.max_entries > 0:
+        bgc_entries = bgc_entries[: args.max_entries]
+        logger.info("Dataset sliced to %d entries (--max-entries).", len(bgc_entries))
 
     if not bgc_entries:
         logger.error("No BGC entries parsed from MIBiG. Cannot train.")
@@ -1201,6 +1309,15 @@ Examples:
         type=int,
         default=0,
         help="Number of negative windows (0=auto, matches positive count, min 500)",
+    )
+    parser.add_argument(
+        "--max-entries",
+        type=int,
+        default=0,
+        help=(
+            "Limit MIBiG entries used for training (0 = use all). "
+            "Useful for fast smoke-tests, e.g. --max-entries 50."
+        ),
     )
 
     return parser.parse_args()

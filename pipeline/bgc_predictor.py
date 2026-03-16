@@ -326,32 +326,34 @@ class ProphetBackend:
     Inference backend using BGC-Prophet's trained TransformerEncoder models
     with ESM2 protein embeddings.
 
-    The ESM2 model can be swapped at runtime via ``esm_model_name``.  When a
-    model with an embedding dimension different from the BGC-Prophet default
-    (320-dim from ESM2-8M) is selected, a learned linear projection layer
-    automatically maps embeddings down/up to 320-dim before the annotator and
-    classifier consume them.
+    Each ESM2 model size has its own pair of trained weights stored at:
+        <model_dir>/<esm_model_name>/annotator.pt
+        <model_dir>/<esm_model_name>/classifier.pt
+
+    The BGC-Prophet annotator and classifier are always instantiated at the
+    **native embedding dimension** of the chosen ESM2 model.  No PCA or linear
+    projection is used.  This means weights are not interchangeable between
+    model sizes — each size must be trained (or seeded) separately.
 
     Supported ESM2 models (see ``ESM2_REGISTRY``):
-    ┌────────────────────────┬────────┬───────────┬───────────────────┐
+    ┌────────────────────────┬──────┬───────────┬───────────────────┐
     │ Model name             │ Layers │ Embed dim │ Approx. size      │
-    ├────────────────────────┼────────┼───────────┼───────────────────┤
+    ├────────────────────────┼──────┼───────────┼───────────────────┤
     │ esm2_t6_8M_UR50D       │   6    │   320     │ ~30 MB (default)  │
     │ esm2_t12_35M_UR50D     │  12    │   480     │ ~140 MB           │
     │ esm2_t30_150M_UR50D    │  30    │   640     │ ~600 MB           │
     │ esm2_t33_650M_UR50D    │  33    │  1280     │ ~2.5 GB           │
     │ esm2_t36_3B_UR50D      │  36    │  2560     │ ~11 GB            │
     │ esm2_t48_15B_UR50D     │  48    │  5120     │ ~60 GB            │
-    └────────────────────────┴────────┴───────────┴───────────────────┘
+    └────────────────────────┴──────┴───────────┴───────────────────┘
 
     Pipeline:
         1. Translate CDS DNA → protein sequences (BioPython)
-        2. Extract ESM2 embeddings (dim depends on model chosen)
-        3. [Optional] Linear projection → 320-dim (if model ≠ 8M)
-        4. Window embeddings into 128-gene batches
-        5. Annotator: per-gene BGC/non-BGC probability
-        6. Classifier: per-window BGC type probabilities (7 classes)
-        7. Map results back to per-gene BGCGeneRecords
+        2. Extract ESM2 embeddings at native dimension (depends on model)
+        3. Window embeddings into 128-gene batches
+        4. Annotator: per-gene BGC/non-BGC probability
+        5. Classifier: per-window BGC type probabilities (7 classes)
+        6. Map results back to per-gene BGCGeneRecords
     """
 
     # BGC-Prophet annotator/classifier expect 320-dim input
@@ -410,52 +412,27 @@ class ProphetBackend:
             sum(p.numel() for p in self._esm_model.parameters()),
         )
 
-        # ── Check for model-specific weights (native dimension) ────────
+        # ── No PCA — always use native ESM2 embedding dimension ─────────────
+        d_model = self._esm_embed_dim
+        dim_ff = d_model * 4
+        self._annotator_threshold: float = _ANNOTATOR_THRESHOLD
+
         model_specific_dir = model_dir / esm_model_name
-        has_native_weights = (
-            (model_specific_dir / "annotator.pt").exists()
-            and (model_specific_dir / "classifier.pt").exists()
+        annotator_path = model_specific_dir / "annotator.pt"
+        classifier_path = model_specific_dir / "classifier.pt"
+
+        if not annotator_path.exists() or not classifier_path.exists():
+            raise FileNotFoundError(
+                f"No weights found for '{esm_model_name}' at {model_specific_dir}.\n"
+                f"Run the seed script first:\n"
+                f"  python scripts/seed_weights.py --model {esm_model_name}\n"
+                f"Or train on real data:\n"
+                f"  python train_prophet.py --esm-model {esm_model_name}"
+            )
+        logger.info(
+            "Loading weights for '%s' (d_model=%d, no PCA)",
+            esm_model_name, d_model,
         )
-
-        self._needs_pca_projection = False
-        self._annotator_threshold: float = _ANNOTATOR_THRESHOLD  # 0.5 by default
-
-        if has_native_weights:
-            # ── Native-dimension weights found — no PCA needed ────────
-            d_model = self._esm_embed_dim
-            dim_ff = d_model * 4
-            annotator_path = model_specific_dir / "annotator.pt"
-            classifier_path = model_specific_dir / "classifier.pt"
-            logger.info(
-                "Found model-specific weights for '%s' (%d-dim) — "
-                "using native dimension, no PCA projection needed",
-                esm_model_name, d_model,
-            )
-        elif self._esm_embed_dim != self._PROPHET_EXPECTED_DIM:
-            # ── No model-specific weights, dimension mismatch → PCA ──
-            d_model = self._PROPHET_EXPECTED_DIM
-            dim_ff = 1280
-            annotator_path = model_dir / "annotator.pt"
-            classifier_path = model_dir / "classifier.pt"
-            logger.info(
-                "Adding PCA projection %d-dim → %d-dim for BGC-Prophet compatibility",
-                self._esm_embed_dim, self._PROPHET_EXPECTED_DIM,
-            )
-            self._needs_pca_projection = True
-            self._annotator_threshold = 0.35
-            logger.warning(
-                "⚠ PCA projection is data-driven but not BGC-trained — "
-                "annotator threshold lowered to 0.35.  "
-                "For best results, train model-specific weights with train_prophet.py "
-                "or use 'esm2_t6_8M_UR50D'.",
-            )
-        else:
-            # ── Default 320-dim weights, exact match ─────────────────
-            d_model = self._PROPHET_EXPECTED_DIM
-            dim_ff = 1280
-            annotator_path = model_dir / "annotator.pt"
-            classifier_path = model_dir / "classifier.pt"
-
         # ── Load Annotator (transformerEncoderNet) ────────────────────
         if not annotator_path.exists():
             raise FileNotFoundError(f"Annotator weights not found: {annotator_path}")
@@ -580,31 +557,7 @@ class ProphetBackend:
                 logger.info("  ESM2 embedding progress: %d/%d proteins", batch_end, total)
 
 
-        # ── PCA projection (non-8M models) ────────────────────────
-        if self._needs_pca_projection and embeddings:
-            from sklearn.decomposition import PCA  # lazy import
-
-            labels = list(embeddings.keys())
-            raw = np.stack([embeddings[l] for l in labels])  # (N, embed_dim)
-            n_components = min(self._PROPHET_EXPECTED_DIM, raw.shape[0], raw.shape[1])
-
-            pca = PCA(n_components=n_components, random_state=42)
-            projected = pca.fit_transform(raw)  # (N, 320)
-
-            # If fewer samples than 320, pad with zeros to match Prophet dim
-            if n_components < self._PROPHET_EXPECTED_DIM:
-                pad = np.zeros((projected.shape[0], self._PROPHET_EXPECTED_DIM - n_components))
-                projected = np.concatenate([projected, pad], axis=1)
-
-            explained = sum(pca.explained_variance_ratio_) * 100
-            logger.info(
-                "  PCA %d → %d  |  variance retained: %.1f%%  |  %d samples",
-                raw.shape[1], n_components, explained, raw.shape[0],
-            )
-
-            for i, lbl in enumerate(labels):
-                embeddings[lbl] = projected[i]
-
+        return embeddings
         return embeddings
 
     # ------------------------------------------------------------------
@@ -628,7 +581,7 @@ class ProphetBackend:
         valid_gene_ids = [gid for gid in gene_ids if gid in embeddings]
 
         if not valid_gene_ids:
-            embed_dim = self._esm_embed_dim if not self._needs_pca_projection else self._PROPHET_EXPECTED_DIM
+            embed_dim = self._esm_embed_dim
             return [], np.zeros((0, _PROPHET_WINDOW_SIZE, embed_dim)), \
                    np.ones((0, _PROPHET_WINDOW_SIZE), dtype=bool)
 

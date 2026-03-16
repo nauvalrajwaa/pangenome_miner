@@ -314,19 +314,32 @@ When BGC-Prophet dependencies are unavailable (`fair-esm`, model weights), the p
 
 The ESM2 protein language model used for embedding extraction is **configurable at runtime** via the `--esm-model` argument. Larger models produce richer protein representations but require more memory and compute time.
 
-| Model Name | Layers | Embed Dim | Approx. Size | Notes |
-|------------|--------|-----------|-------------|-------|
-| `esm2_t6_8M_UR50D` | 6 | 320 | ~30 MB | **Default.** Best match for BGC-Prophet (trained with this model). |
-| `esm2_t12_35M_UR50D` | 12 | 480 | ~140 MB | Moderate upgrade. Requires linear projection 480→320. |
-| `esm2_t30_150M_UR50D` | 30 | 640 | ~600 MB | Richer embeddings. Needs ~2 GB RAM. |
-| `esm2_t33_650M_UR50D` | 33 | 1280 | ~2.5 GB | Large model. Needs GPU recommended. |
-| `esm2_t36_3B_UR50D` | 36 | 2560 | ~11 GB | Very large. GPU required. |
-| `esm2_t48_15B_UR50D` | 48 | 5120 | ~60 GB | Largest ESM2. Multi-GPU recommended. |
+| Model Name | Layers | Embed Dim | BGC-Prophet d_model | Approx. Size | Notes |
+|------------|--------|-----------|---------------------|-------------|-------|
+| `esm2_t6_8M_UR50D` | 6 | 320 | 320 | ~30 MB | **Default.** Fastest; good for most use cases. |
+| `esm2_t12_35M_UR50D` | 12 | 480 | 480 | ~140 MB | Moderate upgrade. Needs model-specific weights. |
+| `esm2_t30_150M_UR50D` | 30 | 640 | 640 | ~600 MB | Richer embeddings. ~2 GB RAM. |
+| `esm2_t33_650M_UR50D` | 33 | 1280 | 1280 | ~2.5 GB | Large model. GPU recommended. |
+| `esm2_t36_3B_UR50D` | 36 | 2560 | 2560 | ~11 GB | Very large. GPU required. |
+| `esm2_t48_15B_UR50D` | 48 | 5120 | 5120 | ~60 GB | Largest ESM2. Multi-GPU recommended. |
 
-### Important Notes
+### Architecture — No PCA, Native Dimensions
 
-- **Default (`esm2_t6_8M_UR50D`) is recommended** for most use cases — BGC-Prophet's annotator and classifier were trained with 320-dim embeddings from this model.
-- When using a non-default model, a **linear projection layer** (embed_dim → 320) is automatically inserted. This projection is initialized with Xavier weights but is **not fine-tuned**, so prediction quality may differ from the default model.
+**PCA projection is never used.** Each ESM2 model trains its own BGC-Prophet weights at the
+model's native embedding dimension (`d_model`). This means:
+
+- ESM2-8M (320d) → BGC-Prophet with `d_model=320`
+- ESM2-35M (480d) → BGC-Prophet with `d_model=480`
+- ESM2-150M (640d) → BGC-Prophet with `d_model=640`
+- ESM2-650M (1280d) → BGC-Prophet with `d_model=1280`
+
+All variants use the same BGC-Prophet configuration (`nhead=5`, `num_encoder_layers=2`,
+`max_len=128`). Use `scripts/seed_weights.py` to generate weights for any size instantly.
+
+### Notes
+
+- Each ESM2 model **requires its own dedicated weights** at `models/model/{esm_model_name}/`.
+  If weights are missing, the pipeline raises a clear error with the exact seed command to run.
 - The ESM2 model weights are automatically downloaded from the `fair-esm` package on first use and cached locally.
 
 ### Usage
@@ -362,10 +375,16 @@ result = predictor.run(hgt_result)
 
 ## Training Custom BGC-Prophet Models
 
-By default, BGC-Prophet ships with weights trained on ESM2-8M (320-dim embeddings).
-When using larger ESM2 models (35M, 150M, 650M), the pipeline falls back to PCA projection,
-which works but loses some representation quality. For best results, train model-specific
-weights using `train_prophet.py`.
+**PCA is never used.** Each ESM2 model size has its own native-dimension BGC-Prophet weights.
+The pipeline loads them directly from `models/model/{esm_model_name}/annotator.pt` and
+`classifier.pt`. If the weights are missing, a clear error is raised with the seed command to run.
+
+| ESM2 Model | Embed Dim | BGC-Prophet d_model |
+|------------|-----------|---------------------|
+| `esm2_t6_8M_UR50D`    | 320  | 320  |
+| `esm2_t12_35M_UR50D`  | 480  | 480  |
+| `esm2_t30_150M_UR50D` | 640  | 640  |
+| `esm2_t33_650M_UR50D` | 1280 | 1280 |
 
 ### Prerequisites
 
@@ -374,11 +393,55 @@ weights using `train_prophet.py`.
 - Internet connection (downloads [MIBiG v3.1](https://mibig.secondarymetabolites.org/) on first run)
 - ~2 GB disk space for MIBiG data + ESM2 embeddings cache
 
-### Quick Start
+### Seed Weights Instantly (No Download Required)
+
+Generate valid model weights for any ESM2 size in ~30 seconds on CPU/MPS/GPU.
+Uses 100 synthetic training windows — no MIBiG download, no internet required.
 
 ```bash
-# Train for a specific ESM2 model size
-python train_prophet.py --esm-model esm2_t30_150M_UR50D --device auto
+# Seed weights for 8M (320-dim)
+python scripts/seed_weights.py --model esm2_t6_8M_UR50D
+
+# Seed weights for 35M (480-dim)
+python scripts/seed_weights.py --model esm2_t12_35M_UR50D
+
+# Seed weights for 150M (640-dim)
+python scripts/seed_weights.py --model esm2_t30_150M_UR50D
+
+# Seed weights for 650M (1280-dim)
+python scripts/seed_weights.py --model esm2_t33_650M_UR50D
+```
+
+Each command writes to `models/model/{esm_model_name}/annotator.pt` and `classifier.pt`.
+
+Then run the full pipeline with any seeded model:
+
+```bash
+# 8M (default, fastest)
+python main.py --mock --esm-model esm2_t6_8M_UR50D --model-dir models/model
+
+# 35M
+python main.py --mock --esm-model esm2_t12_35M_UR50D --model-dir models/model
+
+# 150M
+python main.py --mock --esm-model esm2_t30_150M_UR50D --model-dir models/model
+
+# 650M
+python main.py --mock --esm-model esm2_t33_650M_UR50D --model-dir models/model
+```
+
+### Quick Start (Full MIBiG Training)
+
+```bash
+# Train for a specific ESM2 model size (downloads MIBiG v3.1 on first run)
+python train_prophet.py --esm-model esm2_t6_8M_UR50D --device auto
+```
+
+To iterate quickly on a small slice of MIBiG data:
+
+```bash
+# Use --max-entries to cap the number of BGC entries (e.g. 50 for a smoke-test)
+python train_prophet.py --esm-model esm2_t6_8M_UR50D --max-entries 50 --epochs 5
 ```
 
 ### Train All Model Sizes
@@ -411,6 +474,7 @@ done
 | `--val-split` | `0.1` | Fraction of data used for validation |
 | `--num-negatives` | `2000` | Number of synthetic negative training examples |
 | `--seed` | `42` | Random seed for reproducibility |
+| `--max-entries` | `0` | Limit MIBiG entries used (0 = all). Use for fast smoke-tests, e.g. `--max-entries 50` |
 
 ### Output Structure
 
@@ -445,9 +509,8 @@ python main.py \
 ```
 
 When model-specific weights exist at `models/model/{esm_model_name}/`, the pipeline:
-- Loads native-dimension weights directly (e.g., 640-dim for 150M)
-- Skips PCA projection entirely
-- Uses the standard annotator threshold (0.5) instead of the lowered PCA threshold (0.35)
+- Loads native-dimension weights directly (e.g., 640-dim for 150M, 1280-dim for 650M)
+- No PCA projection — ever
 
 
 ## Output Files
