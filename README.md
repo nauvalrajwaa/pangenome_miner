@@ -325,22 +325,28 @@ The ESM2 protein language model used for embedding extraction is **configurable 
 
 ### Architecture — No PCA, Native Dimensions
 
-**PCA projection is never used.** Each ESM2 model trains its own BGC-Prophet weights at the
-model's native embedding dimension (`d_model`). This means:
+**PCA projection is never used.** Each ESM2 model uses its own BGC-Prophet weights
+at the model's native embedding dimension (`d_model`).
 
-- ESM2-8M (320d) → BGC-Prophet with `d_model=320`
-- ESM2-35M (480d) → BGC-Prophet with `d_model=480`
-- ESM2-150M (640d) → BGC-Prophet with `d_model=640`
-- ESM2-650M (1280d) → BGC-Prophet with `d_model=1280`
+| Model | Embed dim | nhead | Weight source |
+|-------|-----------|-------|---------------|
+| `esm2_t6_8M_UR50D` (default) | 320 | 5 | Official upstream `models/model/` root |
+| `esm2_t12_35M_UR50D` | 480 | 5 | User-trained/seeded subfolder |
+| `esm2_t30_150M_UR50D` | 640 | 5 | User-trained/seeded subfolder |
+| `esm2_t33_650M_UR50D` | 1280 | 5 | User-trained/seeded subfolder |
 
-All variants use the same BGC-Prophet configuration (`nhead=5`, `num_encoder_layers=2`,
-`max_len=128`). Use `scripts/seed_weights.py` to generate weights for any size instantly.
+The default 8M model is loaded from `models/model/annotator.pt` and `classifier.pt`
+(the official BGC-Prophet pre-trained weights, `nhead=5`). Larger models are loaded
+from `models/model/{esm_model_name}/` and use `nhead=5`.
 
 ### Notes
 
-- Each ESM2 model **requires its own dedicated weights** at `models/model/{esm_model_name}/`.
-  If weights are missing, the pipeline raises a clear error with the exact seed command to run.
-- The ESM2 model weights are automatically downloaded from the `fair-esm` package on first use and cached locally.
+- **8M default**: uses the official pre-trained weights shipped with this repo.
+  No training or seeding required.
+- **Larger models (35M/150M/650M)**: require dedicated weights at
+  `models/model/{esm_model_name}/`. Seed in ~30s or train on real MIBiG data.
+- ESM2 model weights (the protein language model) are auto-downloaded from the
+  `fair-esm` package on first use and cached locally.
 
 ### Usage
 
@@ -375,17 +381,21 @@ result = predictor.run(hgt_result)
 
 ## Training Custom BGC-Prophet Models
 
-**PCA is never used.** Each ESM2 model size has its own native-dimension BGC-Prophet weights.
-The pipeline loads them directly from `models/model/{esm_model_name}/annotator.pt` and
-`classifier.pt`. If the weights are missing, a clear error is raised with the seed command to run.
+**The default ESM2-8M model ships with official pre-trained weights** — no training
+needed to run the pipeline out of the box:
+```bash
+python main.py --genomes data/genomes --annotations data/annotations --output output/
+```
 
-| ESM2 Model | Embed Dim | BGC-Prophet d_model |
-|------------|-----------|---------------------|
-| `esm2_t6_8M_UR50D`    | 320  | 320  |
-| `esm2_t12_35M_UR50D`  | 480  | 480  |
-| `esm2_t30_150M_UR50D` | 640  | 640  |
-| `esm2_t33_650M_UR50D` | 1280 | 1280 |
+Training is **only needed for larger models** (35M, 150M, 650M), which require
+their own BGC-Prophet weights at the native embedding dimension.
 
+| ESM2 Model | Embed Dim | nhead | Needs training? |
+|------------|-----------|-------|-----------------|
+| `esm2_t6_8M_UR50D` (default) | 320 | 3 | **No** — official weights included |
+| `esm2_t12_35M_UR50D` | 480 | 5 | Yes — seed or train |
+| `esm2_t30_150M_UR50D` | 640 | 5 | Yes — seed or train |
+| `esm2_t33_650M_UR50D` | 1280 | 5 | Yes — seed or train |
 ### Prerequisites
 
 - Python 3.9+
@@ -395,13 +405,10 @@ The pipeline loads them directly from `models/model/{esm_model_name}/annotator.p
 
 ### Seed Weights Instantly (No Download Required)
 
-Generate valid model weights for any ESM2 size in ~30 seconds on CPU/MPS/GPU.
+Generate valid model weights for 35M/150M/650M in ~30 seconds on CPU/MPS/GPU.
 Uses 100 synthetic training windows — no MIBiG download, no internet required.
 
 ```bash
-# Seed weights for 8M (320-dim)
-python scripts/seed_weights.py --model esm2_t6_8M_UR50D
-
 # Seed weights for 35M (480-dim)
 python scripts/seed_weights.py --model esm2_t12_35M_UR50D
 
@@ -414,40 +421,45 @@ python scripts/seed_weights.py --model esm2_t33_650M_UR50D
 
 Each command writes to `models/model/{esm_model_name}/annotator.pt` and `classifier.pt`.
 
-Then run the full pipeline with any seeded model:
+Each command writes to `models/model/{esm_model_name}/annotator.pt` and `classifier.pt`.
+
+Then run the full pipeline with any model:
 
 ```bash
-# 8M (default, fastest)
-python main.py --mock --esm-model esm2_t6_8M_UR50D --model-dir models/model
+# 8M (default, fastest) — no weights needed, official weights included
+python main.py --genomes data/genomes --annotations data/annotations --output output/
 
-# 35M
-python main.py --mock --esm-model esm2_t12_35M_UR50D --model-dir models/model
+# 35M (seed first with seed_weights.py)
+python main.py --genomes data/genomes --annotations data/annotations --output output/ \
+  --esm-model esm2_t12_35M_UR50D
 
 # 150M
-python main.py --mock --esm-model esm2_t30_150M_UR50D --model-dir models/model
+python main.py --genomes data/genomes --annotations data/annotations --output output/ \
+  --esm-model esm2_t30_150M_UR50D
 
 # 650M
-python main.py --mock --esm-model esm2_t33_650M_UR50D --model-dir models/model
+python main.py --genomes data/genomes --annotations data/annotations --output output/ \
+  --esm-model esm2_t33_650M_UR50D
 ```
 
 ### Quick Start (Full MIBiG Training)
 
 ```bash
-# Train for a specific ESM2 model size (downloads MIBiG v3.1 on first run)
-python train_prophet.py --esm-model esm2_t6_8M_UR50D --device auto
+# Train for a specific larger ESM2 model (downloads MIBiG v3.1 on first run)
+python train_prophet.py --esm-model esm2_t12_35M_UR50D --device auto
 ```
 
 To iterate quickly on a small slice of MIBiG data:
 
 ```bash
 # Use --max-entries to cap the number of BGC entries (e.g. 50 for a smoke-test)
-python train_prophet.py --esm-model esm2_t6_8M_UR50D --max-entries 50 --epochs 5
+python train_prophet.py --esm-model esm2_t12_35M_UR50D --max-entries 50 --epochs 5
 ```
 
-### Train All Model Sizes
+### Train All Larger Models
 
 ```bash
-for model in esm2_t6_8M_UR50D esm2_t12_35M_UR50D esm2_t30_150M_UR50D esm2_t33_650M_UR50D; do
+for model in esm2_t12_35M_UR50D esm2_t30_150M_UR50D esm2_t33_650M_UR50D; do
     echo "=== Training $model ==="
     python train_prophet.py --esm-model "$model" --epochs 50 --device auto
 done
@@ -480,17 +492,17 @@ done
 
 ```
 models/model/
-├── annotator.pt                    # Default 8M weights (shipped)
-├── classifier.pt                   # Default 8M weights (shipped)
-├── esm2_t6_8M_UR50D/              # Retrained 8M
+├── annotator.pt                    # Official BGC-Prophet 8M weights (nhead=5, 320-dim)
+├── classifier.pt                   # Official BGC-Prophet 8M weights (nhead=5, 320-dim)
+├── esm2_t12_35M_UR50D/             # User-trained 35M weights (nhead=5, 480-dim)
 │   ├── annotator.pt
 │   ├── classifier.pt
 │   └── training_meta.json
-├── esm2_t30_150M_UR50D/            # 150M model (640-dim)
+├── esm2_t30_150M_UR50D/            # User-trained 150M weights (nhead=5, 640-dim)
 │   ├── annotator.pt
 │   ├── classifier.pt
 │   └── training_meta.json
-└── esm2_t33_650M_UR50D/            # 650M model (1280-dim)
+└── esm2_t33_650M_UR50D/            # User-trained 650M weights (nhead=5, 1280-dim)
     ├── annotator.pt
     ├── classifier.pt
     └── training_meta.json
@@ -498,19 +510,17 @@ models/model/
 
 ### Using Trained Models
 
-After training, the pipeline **auto-detects** model-specific weights — no configuration needed:
-
-```bash
-python main.py \
-    --genomes data/genomes \
-    --annotations data/annotations \
-    --output results \
-    --esm-model esm2_t30_150M_UR50D
+After seeding or training, the pipeline auto-detects weights — no configuration needed.
+The 8M default always uses the official root-level weights (no subfolder).
+Larger models are loaded from their dedicated subfolder:
 ```
-
-When model-specific weights exist at `models/model/{esm_model_name}/`, the pipeline:
-- Loads native-dimension weights directly (e.g., 640-dim for 150M, 1280-dim for 650M)
+8M:   models/model/annotator.pt + classifier.pt  (nhead=5, official)
+35M:  models/model/esm2_t12_35M_UR50D/           (nhead=5, user-trained)
+150M: models/model/esm2_t30_150M_UR50D/          (nhead=5, user-trained)
+650M: models/model/esm2_t33_650M_UR50D/          (nhead=5, user-trained)
+```
 - No PCA projection — ever
+- Missing weights raise a clear error with the exact command to run
 
 
 ## Output Files

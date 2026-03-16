@@ -326,9 +326,11 @@ class ProphetBackend:
     Inference backend using BGC-Prophet's trained TransformerEncoder models
     with ESM2 protein embeddings.
 
-    Each ESM2 model size has its own pair of trained weights stored at:
-        <model_dir>/<esm_model_name>/annotator.pt
-        <model_dir>/<esm_model_name>/classifier.pt
+    Weight file locations:
+        ESM2-8M (default): <model_dir>/annotator.pt and classifier.pt
+            — official pre-trained weights from the BGC-Prophet authors (nhead=5)
+        ESM2 35M/150M/650M: <model_dir>/<esm_model_name>/annotator.pt
+            — user-trained or seeded weights (nhead=5)
 
     The BGC-Prophet annotator and classifier are always instantiated at the
     **native embedding dimension** of the chosen ESM2 model.  No PCA or linear
@@ -336,16 +338,14 @@ class ProphetBackend:
     model sizes — each size must be trained (or seeded) separately.
 
     Supported ESM2 models (see ``ESM2_REGISTRY``):
-    ┌────────────────────────┬──────┬───────────┬───────────────────┐
-    │ Model name             │ Layers │ Embed dim │ Approx. size      │
-    ├────────────────────────┼──────┼───────────┼───────────────────┤
-    │ esm2_t6_8M_UR50D       │   6    │   320     │ ~30 MB (default)  │
-    │ esm2_t12_35M_UR50D     │  12    │   480     │ ~140 MB           │
-    │ esm2_t30_150M_UR50D    │  30    │   640     │ ~600 MB           │
-    │ esm2_t33_650M_UR50D    │  33    │  1280     │ ~2.5 GB           │
-    │ esm2_t36_3B_UR50D      │  36    │  2560     │ ~11 GB            │
-    │ esm2_t48_15B_UR50D     │  48    │  5120     │ ~60 GB            │
-    └────────────────────────┴──────┴───────────┴───────────────────┘
+    ┌────────────────────────┬──────┬───────────┬───────┬───────────────────────────┐
+    │ Model name             │Layers│ Embed dim │ nhead │ Weight source             │
+    ├────────────────────────┼──────┼───────────┼───────┼───────────────────────────┤
+    │ esm2_t6_8M_UR50D       │   6  │   320     │   5   │ Official (models/model/)  │
+    │ esm2_t12_35M_UR50D     │  12  │   480     │   5   │ User-trained (subfolder)  │
+    │ esm2_t30_150M_UR50D    │  30  │   640     │   5   │ User-trained (subfolder)  │
+    │ esm2_t33_650M_UR50D    │  33  │  1280     │   5   │ User-trained (subfolder)  │
+    └────────────────────────┴──────┴───────────┴───────┴───────────────────────────┘
 
     Pipeline:
         1. Translate CDS DNA → protein sequences (BioPython)
@@ -356,9 +356,7 @@ class ProphetBackend:
         6. Map results back to per-gene BGCGeneRecords
     """
 
-    # BGC-Prophet annotator/classifier expect 320-dim input
-    _PROPHET_EXPECTED_DIM = 320
-
+    # Stale constant kept for reference only; actual dim is always self._esm_embed_dim
     def __init__(
         self,
         model_dir: Path,
@@ -412,32 +410,59 @@ class ProphetBackend:
             sum(p.numel() for p in self._esm_model.parameters()),
         )
 
-        # ── No PCA — always use native ESM2 embedding dimension ─────────────
+        # ── Weight path & architecture selection ─────────────────────────────
+        # The default ESM2-8M model ships with official pre-trained weights from
+        # the BGC-Prophet authors at <model_dir>/annotator.pt and classifier.pt
+        # (no subfolder).  These weights use nhead=5 (d_model=320 is divisible by 5).
+        #
+        # For larger models (35M, 150M, 650M) weights are user-trained/seeded at
+        # <model_dir>/<esm_model_name>/ and also use nhead=5.
         d_model = self._esm_embed_dim
         dim_ff = d_model * 4
+        nhead = 5
         self._annotator_threshold: float = _ANNOTATOR_THRESHOLD
 
-        model_specific_dir = model_dir / esm_model_name
-        annotator_path = model_specific_dir / "annotator.pt"
-        classifier_path = model_specific_dir / "classifier.pt"
+        _is_default_8m = (esm_model_name == "esm2_t6_8M_UR50D")
+
+        if _is_default_8m:
+            # Official upstream weights in model_dir root
+            annotator_path  = model_dir / "annotator.pt"
+            classifier_path = model_dir / "classifier.pt"
+            weight_source = "upstream pre-trained (BGC-Prophet)"
+        else:
+            # User-trained weights in a model-specific subfolder
+            model_specific_dir = model_dir / esm_model_name
+            annotator_path  = model_specific_dir / "annotator.pt"
+            classifier_path = model_specific_dir / "classifier.pt"
+            weight_source = f"user-trained ({esm_model_name} subfolder)"
 
         if not annotator_path.exists() or not classifier_path.exists():
-            raise FileNotFoundError(
-                f"No weights found for '{esm_model_name}' at {model_specific_dir}.\n"
-                f"Run the seed script first:\n"
-                f"  python scripts/seed_weights.py --model {esm_model_name}\n"
-                f"Or train on real data:\n"
-                f"  python train_prophet.py --esm-model {esm_model_name}"
-            )
+            if _is_default_8m:
+                raise FileNotFoundError(
+                    f"Official BGC-Prophet weights not found at {model_dir}.\n"
+                    f"Expected:\n"
+                    f"  {model_dir / 'annotator.pt'}\n"
+                    f"  {model_dir / 'classifier.pt'}\n"
+                    f"Ensure models/model/annotator.pt and classifier.pt are present."
+                )
+            else:
+                model_specific_dir = model_dir / esm_model_name
+                raise FileNotFoundError(
+                    f"No weights found for '{esm_model_name}' at {model_specific_dir}.\n"
+                    f"Seed weights with:\n"
+                    f"  python scripts/seed_weights.py --model {esm_model_name}\n"
+                    f"Or train on real MIBiG data:\n"
+                    f"  python train_prophet.py --esm-model {esm_model_name}"
+                )
+
         logger.info(
-            "Loading weights for '%s' (d_model=%d, no PCA)",
-            esm_model_name, d_model,
+            "Loading weights for '%s' (d_model=%d, nhead=%d) — %s",
+            esm_model_name, d_model, nhead, weight_source,
         )
+
         # ── Load Annotator (transformerEncoderNet) ────────────────────
-        if not annotator_path.exists():
-            raise FileNotFoundError(f"Annotator weights not found: {annotator_path}")
         self._annotator = transformerEncoderNet(
-            d_model=d_model, nhead=5, num_encoder_layers=2,
+            d_model=d_model, nhead=nhead, num_encoder_layers=2,
             max_len=_PROPHET_WINDOW_SIZE, dim_feedforward=dim_ff,
         )
         self._annotator.load_state_dict(
@@ -445,13 +470,11 @@ class ProphetBackend:
         )
         self._annotator = self._annotator.to(self.device)
         self._annotator.eval()
-        logger.info("BGC-Prophet annotator loaded: %s (d_model=%d)", annotator_path, d_model)
+        logger.info("BGC-Prophet annotator loaded: %s (d_model=%d, nhead=%d)", annotator_path, d_model, nhead)
 
         # ── Load Classifier (transformerClassifier) ───────────────────
-        if not classifier_path.exists():
-            raise FileNotFoundError(f"Classifier weights not found: {classifier_path}")
         self._classifier = transformerClassifier(
-            d_model=d_model, nhead=5, num_encoder_layers=2,
+            d_model=d_model, nhead=nhead, num_encoder_layers=2,
             max_len=_PROPHET_WINDOW_SIZE, dim_feedforward=dim_ff,
             labels_num=len(_PROPHET_TYPE_LABELS),
         )
@@ -460,7 +483,7 @@ class ProphetBackend:
         )
         self._classifier = self._classifier.to(self.device)
         self._classifier.eval()
-        logger.info("BGC-Prophet classifier loaded: %s (d_model=%d)", classifier_path, d_model)
+        logger.info("BGC-Prophet classifier loaded: %s (d_model=%d, nhead=%d)", classifier_path, d_model, nhead)
     # ------------------------------------------------------------------
     # Step 1: DNA → Protein translation
     # ------------------------------------------------------------------

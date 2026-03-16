@@ -2,11 +2,15 @@
 seed_weights.py
 ===============
 Quick-seed script that trains BGC-Prophet (annotator + classifier) on a tiny
-synthetic dataset and saves valid weight files for any supported ESM2 model.
+synthetic dataset and saves valid weight files for ESM2 35M/150M/650M models.
 
 No internet connection required — embeddings are random tensors of the correct
 dimensionality for the chosen ESM2 variant.  The sole purpose is to produce
 loadable .pt files that the main pipeline can consume immediately.
+
+NOTE: The default ESM2-8M model already ships with official pre-trained weights
+from the BGC-Prophet authors at models/model/annotator.pt and classifier.pt.
+This script is only needed for larger models (35M, 150M, 650M).
 
 The annotator and classifier are always trained at the **native embedding
 dimension** of the chosen ESM2 model — no PCA or projection is used.
@@ -18,7 +22,7 @@ Output
 
 Usage
 -----
-  # Seed 8M weights (320-dim) — default
+  # Seed 35M weights (480-dim) — default
   python scripts/seed_weights.py
 
   # Seed a specific model
@@ -26,8 +30,8 @@ Usage
   python scripts/seed_weights.py --model esm2_t30_150M_UR50D
   python scripts/seed_weights.py --model esm2_t33_650M_UR50D
 
-  # All supported models in one go
-  for model in esm2_t6_8M_UR50D esm2_t12_35M_UR50D esm2_t30_150M_UR50D esm2_t33_650M_UR50D; do
+  # All larger models in one go
+  for model in esm2_t12_35M_UR50D esm2_t30_150M_UR50D esm2_t33_650M_UR50D; do
       python scripts/seed_weights.py --model "$model"
   done
 """
@@ -47,8 +51,9 @@ from torch.utils.data import DataLoader, Dataset, random_split
 # ---------------------------------------------------------------------------
 # ESM2 model registry — must stay in sync with bgc_predictor.py / train_prophet.py
 # ---------------------------------------------------------------------------
+# NOTE: 8M is excluded — it uses official BGC-Prophet weights (nhead=3) at
+# models/model/ root. This script only seeds weights for larger ESM2 models.
 ESM2_REGISTRY: dict[str, dict] = {
-    "esm2_t6_8M_UR50D":    {"embed_dim": 320,  "params": "8M"},
     "esm2_t12_35M_UR50D":  {"embed_dim": 480,  "params": "35M"},
     "esm2_t30_150M_UR50D": {"embed_dim": 640,  "params": "150M"},
     "esm2_t33_650M_UR50D": {"embed_dim": 1280, "params": "650M"},
@@ -281,16 +286,16 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="\n".join([
             "Examples:",
-            "  python scripts/seed_weights.py                          # 8M (default)",
+            "  python scripts/seed_weights.py                          # 35M (default)",
             "  python scripts/seed_weights.py --model esm2_t12_35M_UR50D",
             "  python scripts/seed_weights.py --model esm2_t30_150M_UR50D",
             "  python scripts/seed_weights.py --model esm2_t33_650M_UR50D",
         ]),
     )
     p.add_argument(
-        "--model", type=str, default="esm2_t6_8M_UR50D",
+        "--model", type=str, default="esm2_t12_35M_UR50D",
         choices=list(ESM2_REGISTRY.keys()),
-        help="ESM2 model to seed weights for (default: esm2_t6_8M_UR50D).",
+        help="ESM2 model to seed weights for (default: esm2_t12_35M_UR50D).",
     )
     p.add_argument("--epochs",    type=int,   default=10,  help="Training epochs (default: 10)")
     p.add_argument("--n-windows", type=int,   default=100, help="Synthetic windows to generate (default: 100)")

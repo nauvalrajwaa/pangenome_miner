@@ -3,8 +3,10 @@
 Train BGC-Prophet annotator and classifier for any ESM2 model size.
 
 This script retrains the BGC-Prophet TransformerEncoder models at each ESM2
-embedding dimension, so that non-8M models get native-dimension weights and
-PCA/projection hacks become unnecessary.
+embedding dimension, so that larger models (35M, 150M, 650M) get native-dimension
+weights. The default ESM2-8M model already ships with official pre-trained weights
+from the BGC-Prophet authors at models/model/annotator.pt and classifier.pt.
+This script is only needed for non-8M models.
 
 Usage:
     python train_prophet.py \\
@@ -56,8 +58,10 @@ logger = logging.getLogger("train_prophet")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+# NOTE: 8M is excluded here — the default model uses the official upstream
+# BGC-Prophet weights at models/model/ root (nhead=3). This script only trains
+# weights for larger models (35M, 150M, 650M) at their native embedding dimensions.
 ESM2_REGISTRY: Dict[str, Dict] = {
-    "esm2_t6_8M_UR50D":    {"layers": 6,  "embed_dim": 320,  "params": "8M"},
     "esm2_t12_35M_UR50D":  {"layers": 12, "embed_dim": 480,  "params": "35M"},
     "esm2_t30_150M_UR50D": {"layers": 30, "embed_dim": 640,  "params": "150M"},
     "esm2_t33_650M_UR50D": {"layers": 33, "embed_dim": 1280, "params": "650M"},
@@ -1223,21 +1227,24 @@ def main(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Train BGC-Prophet annotator & classifier for any ESM2 model size.",
+        description="Train BGC-Prophet annotator & classifier for ESM2 35M/150M/650M models.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Train for ESM2-150M (default settings)
-  python train_prophet.py --esm-model esm2_t30_150M_UR50D
+The default ESM2-8M model already ships with official pre-trained weights
+at models/model/annotator.pt and classifier.pt. This script is for larger models.
 
-  # Train for ESM2-8M with custom epochs and batch size
-  python train_prophet.py --esm-model esm2_t6_8M_UR50D --epochs 100 --batch-size 32
+Examples:
+  # Train for ESM2-35M
+  python train_prophet.py --esm-model esm2_t12_35M_UR50D
+
+  # Train for ESM2-150M (default)
+  python train_prophet.py --esm-model esm2_t30_150M_UR50D
 
   # Train for ESM2-650M on GPU with small batch (for limited VRAM)
   python train_prophet.py --esm-model esm2_t33_650M_UR50D --batch-size 4 --device cuda
 
-  # Train all 4 models sequentially
-  for model in esm2_t6_8M_UR50D esm2_t12_35M_UR50D esm2_t30_150M_UR50D esm2_t33_650M_UR50D; do
+  # Train all larger models sequentially
+  for model in esm2_t12_35M_UR50D esm2_t30_150M_UR50D esm2_t33_650M_UR50D; do
     python train_prophet.py --esm-model $model
   done
         """,
@@ -1246,9 +1253,9 @@ Examples:
     parser.add_argument(
         "--esm-model",
         type=str,
-        default="esm2_t6_8M_UR50D",
+        default="esm2_t12_35M_UR50D",
         choices=list(ESM2_REGISTRY.keys()),
-        help="ESM2 model variant to train for (default: esm2_t6_8M_UR50D)",
+        help="ESM2 model variant to train for (default: esm2_t12_35M_UR50D)",
     )
     parser.add_argument(
         "--data-dir",
