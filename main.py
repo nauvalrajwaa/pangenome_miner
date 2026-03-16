@@ -231,13 +231,17 @@ def run_phase2(phase1_result: PangenomeResult, miner: PangenomeMiner, args: argp
 # ---------------------------------------------------------------------------
 # Phase 3
 # ---------------------------------------------------------------------------
-def run_phase3(hgt_result: HGTResult, args: argparse.Namespace) -> BGCResult:
+def run_phase3(
+    hgt_result: HGTResult,
+    all_gene_records,
+    args: argparse.Namespace,
+) -> BGCResult:
     logger.info("=" * 60)
     logger.info("PHASE 3 — The AI Discoverer (BGC Prediction)")
     logger.info("=" * 60)
 
     predictor = BGCPredictor(seed=42, min_confidence=0.25, use_keyword_boost=True, model_dir=args.model_dir, esm_model_name=args.esm_model, device=args.device)
-    bgc_result = predictor.run(hgt_result)
+    bgc_result = predictor.run(hgt_result, all_gene_records=all_gene_records)
 
     # Phase 3 Visualizations
     logger.info("Generating Phase 3 visualizations ...")
@@ -343,7 +347,7 @@ def main() -> None:
 
     phase1_result, miner = run_phase1(args)
     hgt_result = run_phase2(phase1_result, miner, args)
-    run_phase3(hgt_result, args)
+    run_phase3(hgt_result, miner._all_records, args)
 
     logger.info("Pipeline complete. All outputs in: %s", args.output)
 

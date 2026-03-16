@@ -47,7 +47,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -88,6 +88,7 @@ if not _PROPHET_AVAILABLE:
     )
 
 from pipeline.hgt_detective import HGTGeneRecord, HGTResult
+from pipeline.pangenome_miner import GeneRecord
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,8 @@ _ANNOTATOR_THRESHOLD = 0.5
 
 # Classifier threshold: minimum probability for a class assignment
 _CLASSIFIER_THRESHOLD = 0.3
+_OUTPUT_MAX_GAP = 3
+_OUTPUT_MIN_COUNT = 2
 
 # BGC-Prophet window size: genes are batched in windows of this length
 _PROPHET_WINDOW_SIZE = 128
@@ -589,46 +592,69 @@ class ProphetBackend:
 
     def _create_windows(
         self,
-        gene_ids: List[str],
+        gene_records: Sequence[GeneRecord],
         embeddings: Dict[str, np.ndarray],
-    ) -> Tuple[List[List[str]], np.ndarray, np.ndarray]:
-        """
-        Create 128-gene windows from gene embeddings.
+    ) -> Tuple[List[List[int]], np.ndarray, np.ndarray]:
+        valid_pairs = [
+            (i, rec)
+            for i, rec in enumerate(gene_records)
+            if rec.gene_id in embeddings
+        ]
 
-        Returns:
-            window_gene_ids: list of lists, each inner list has gene_ids in that window
-            window_embeddings: (n_windows, 128, embed_dim) tensor
-            padding_masks: (n_windows, 128) boolean tensor (True = padded)
-        """
-        # Filter to genes that have embeddings
-        valid_gene_ids = [gid for gid in gene_ids if gid in embeddings]
+        valid_pairs.sort(
+            key=lambda item: (
+                item[1].strain_id,
+                item[1].contig,
+                item[1].start,
+                item[1].end,
+                item[1].gene_id,
+            )
+        )
 
-        if not valid_gene_ids:
+        if not valid_pairs:
             embed_dim = self._esm_embed_dim
             return [], np.zeros((0, _PROPHET_WINDOW_SIZE, embed_dim)), \
                    np.ones((0, _PROPHET_WINDOW_SIZE), dtype=bool)
 
-        # Split into non-overlapping windows of size 128
-        all_window_ids: List[List[str]] = []
-        n = len(valid_gene_ids)
-        for start in range(0, n, _PROPHET_WINDOW_SIZE):
-            end = min(start + _PROPHET_WINDOW_SIZE, n)
-            all_window_ids.append(valid_gene_ids[start:end])
+        all_window_indices: List[List[int]] = []
+        current_group: List[int] = []
+        current_key: Optional[Tuple[str, str]] = None
 
-        n_windows = len(all_window_ids)
+        for rec_idx, rec in valid_pairs:
+            group_key = (
+                rec.strain_id,
+                rec.contig,
+            )
+            if current_key is None:
+                current_key = group_key
+            if group_key != current_key:
+                for start in range(0, len(current_group), _PROPHET_WINDOW_SIZE):
+                    end = min(start + _PROPHET_WINDOW_SIZE, len(current_group))
+                    all_window_indices.append(current_group[start:end])
+                current_group = []
+                current_key = group_key
+            current_group.append(rec_idx)
+
+        if current_group:
+            for start in range(0, len(current_group), _PROPHET_WINDOW_SIZE):
+                end = min(start + _PROPHET_WINDOW_SIZE, len(current_group))
+                all_window_indices.append(current_group[start:end])
+
+        n_windows = len(all_window_indices)
         # Determine embed dim from actual embeddings
-        embed_dim = embeddings[valid_gene_ids[0]].shape[0]
+        embed_dim = embeddings[valid_pairs[0][1].gene_id].shape[0]
         window_embs = np.zeros(
             (n_windows, _PROPHET_WINDOW_SIZE, embed_dim), dtype=np.float32
         )
         pad_masks = np.ones((n_windows, _PROPHET_WINDOW_SIZE), dtype=bool)
 
-        for w_idx, w_ids in enumerate(all_window_ids):
-            for g_idx, gid in enumerate(w_ids):
+        for w_idx, w_indices in enumerate(all_window_indices):
+            for g_idx, rec_idx in enumerate(w_indices):
+                gid = gene_records[rec_idx].gene_id
                 window_embs[w_idx, g_idx, :] = embeddings[gid]
                 pad_masks[w_idx, g_idx] = False  # not padded
 
-        return all_window_ids, window_embs, pad_masks
+        return all_window_indices, window_embs, pad_masks
 
     # ------------------------------------------------------------------
     # Step 4: Annotator inference (per-gene BGC probability)
@@ -680,75 +706,74 @@ class ProphetBackend:
     # Step 6: Classify individual genes
     # ------------------------------------------------------------------
 
-    def _classify_gene(
+    def _select_bgc_span(
         self,
-        bgc_prob: float,
-        window_type_probs: np.ndarray,
+        annotator_probs: np.ndarray,
+        valid_len: int,
+    ) -> Optional[Tuple[int, int]]:
+        tdlabels = np.zeros(valid_len, dtype=np.int8)
+        tdlabels[annotator_probs[:valid_len] > self._annotator_threshold] = 1
+        if not np.any(tdlabels == 1):
+            return None
+
+        current_start = int(np.argmax(tdlabels == 1))
+        current_end = current_start
+        output_start = 0
+        output_end = 0
+        max_range = 0
+
+        for i in range(current_start + 1, valid_len):
+            if tdlabels[i] == 1:
+                if i - current_end <= _OUTPUT_MAX_GAP:
+                    current_end = i
+                else:
+                    if current_end - current_start > max_range:
+                        output_start = current_start
+                        output_end = current_end
+                        max_range = current_end - current_start
+                    current_start = i
+                    current_end = i
+
+        if current_end - current_start > max_range:
+            output_start = current_start
+            output_end = current_end
+            max_range = current_end - current_start
+
+        if max_range < _OUTPUT_MIN_COUNT:
+            return None
+        return output_start, output_end
+
+    def _classify_region(
+        self,
+        type_probs: np.ndarray,
     ) -> Tuple[str, int, float, List[float]]:
-        """
-        Determine the BGC class for a single gene based on annotator and
-        classifier outputs.
-
-        Args:
-            bgc_prob: annotator probability (0-1) for this gene
-            window_type_probs: (7,) classifier output for this gene's window
-
-        Returns:
-            (class_label, class_idx, confidence, class_scores)
-            class_scores has N_CLASSES (8) entries including NonBGC at index 0
-        """
-        # If annotator says non-BGC
-        if bgc_prob < self._annotator_threshold:
-            non_bgc_conf = 1.0 - bgc_prob
-            # class_scores: [NonBGC_conf, 0, 0, 0, 0, 0, 0, 0]
-            class_scores = [non_bgc_conf] + [0.0] * len(_PROPHET_TYPE_LABELS)
-            return "NonBGC", 0, non_bgc_conf, class_scores
-
-        # Gene is BGC — determine type from classifier
-        # Apply classification thresholding (from BGC-Prophet source)
         other_idx = _PROPHET_TYPE_LABELS.index("Other")
-        threshold = max(float(window_type_probs[other_idx]), _CLASSIFIER_THRESHOLD)
-
-        # Find classes above threshold
-        above_threshold = window_type_probs >= threshold
+        threshold = max(float(type_probs[other_idx]), _CLASSIFIER_THRESHOLD)
+        above_threshold = type_probs >= threshold
         selected_classes = []
         selected_probs = []
 
         for i, (is_above, label) in enumerate(zip(above_threshold, _PROPHET_TYPE_LABELS)):
             if is_above:
                 selected_classes.append(label)
-                selected_probs.append(float(window_type_probs[i]))
+                selected_probs.append(float(type_probs[i]))
 
-        # Remove "Other" if other specific classes are present
         if len(selected_classes) > 1 and "Other" in selected_classes:
             other_pos = selected_classes.index("Other")
             selected_classes.pop(other_pos)
             selected_probs.pop(other_pos)
 
         if selected_classes:
-            # Use the highest-probability class as the primary prediction
             best_idx_in_selected = int(np.argmax(selected_probs))
             primary_label = selected_classes[best_idx_in_selected]
-            primary_conf = selected_probs[best_idx_in_selected]
+            primary_conf = float(sum(selected_probs) / len(selected_probs))
         else:
-            # No class above threshold → "Other"
             primary_label = "Other"
-            primary_conf = 1.0 - float(np.max(window_type_probs))
+            primary_conf = 1.0 - float(np.max(type_probs))
 
-        # Scale confidence by annotator confidence
-        adjusted_conf = primary_conf * bgc_prob
-
-        # Map to our class index
         cls_idx = BGC_CLASSES.index(primary_label) if primary_label in BGC_CLASSES else 7
-
-        # Build full class_scores array (8 entries)
-        # Index 0 = NonBGC probability (1 - bgc_prob)
-        class_scores = [1.0 - bgc_prob]  # NonBGC
-        for i, label in enumerate(_PROPHET_TYPE_LABELS):
-            # Scale type probabilities by the annotator BGC probability
-            class_scores.append(float(window_type_probs[i]) * bgc_prob)
-
-        return primary_label, cls_idx, adjusted_conf, class_scores
+        class_scores = [0.0] + [float(prob) for prob in type_probs]
+        return primary_label, cls_idx, primary_conf, class_scores
 
     # ------------------------------------------------------------------
     # Main inference entry point
@@ -757,6 +782,7 @@ class ProphetBackend:
     def predict(
         self,
         alien_records: List[HGTGeneRecord],
+        all_gene_records: Optional[Sequence[GeneRecord]] = None,
     ) -> Tuple[List[str], List[int], List[float], List[List[float]], List[bool]]:
         """
         Run full BGC-Prophet inference pipeline on alien gene records.
@@ -769,17 +795,26 @@ class ProphetBackend:
             is_bgc_flags:  list of boolean BGC flags
         """
         n_genes = len(alien_records)
-        logger.info("Prophet backend: processing %d alien genes", n_genes)
+        context_records = list(all_gene_records) if all_gene_records else [r.gene_record for r in alien_records]
+        logger.info(
+            "Prophet backend: processing %d alien genes with %d contextual genes",
+            n_genes,
+            len(context_records),
+        )
+
+        def _gene_key(rec: GeneRecord) -> Tuple[str, str, str, int, int]:
+            return (rec.strain_id, rec.contig, rec.gene_id, rec.start, rec.end)
+
+        target_keys = {_gene_key(rec.gene_record) for rec in alien_records}
 
         # Step 1: Translate DNA → protein
         gene_ids = []
         protein_seqs = []
-        gene_id_to_idx = {}  # map gene_id → index in alien_records
         skipped = 0
 
-        for i, rec in enumerate(alien_records):
-            gid = rec.gene_record.gene_id
-            dna = getattr(rec.gene_record, "sequence", None) or ""
+        for rec in context_records:
+            gid = rec.gene_id
+            dna = getattr(rec, "sequence", None) or ""
 
             protein = self._translate_cds(dna)
             if protein is None:
@@ -788,10 +823,13 @@ class ProphetBackend:
 
             gene_ids.append(gid)
             protein_seqs.append(protein)
-            gene_id_to_idx[gid] = i
 
-        logger.info("  Translated %d/%d genes to protein (%d skipped)",
-                     len(gene_ids), n_genes, skipped)
+        logger.info(
+            "  Translated %d/%d contextual genes to protein (%d skipped)",
+            len(gene_ids),
+            len(context_records),
+            skipped,
+        )
 
         if not gene_ids:
             logger.warning("  No valid protein sequences — returning all NonBGC")
@@ -809,30 +847,57 @@ class ProphetBackend:
         logger.info("  Obtained %d embeddings", len(embeddings))
 
         # Step 3: Create windows
-        window_gene_ids, window_embs, pad_masks = self._create_windows(
-            gene_ids, embeddings
+        window_record_indices, window_embs, pad_masks = self._create_windows(
+            context_records, embeddings
         )
         logger.info("  Created %d windows of %d genes",
-                     len(window_gene_ids), _PROPHET_WINDOW_SIZE)
+                     len(window_record_indices), _PROPHET_WINDOW_SIZE)
 
         # Step 4: Annotator inference
         logger.info("  Running annotator ...")
         annotator_probs = self._run_annotator(window_embs)  # (n_windows, 128)
 
-        # Step 5: Classifier inference
-        logger.info("  Running classifier ...")
-        classifier_probs = self._run_classifier(window_embs, pad_masks)  # (n_windows, 7)
+        logger.info("  Applying output-style region selection ...")
+        gene_results: Dict[int, Tuple[str, int, float, List[float]]] = {}
 
-        # Step 6: Map back to individual genes
-        gene_results: Dict[str, Tuple[str, int, float, List[float]]] = {}
+        for w_idx, record_indices in enumerate(window_record_indices):
+            valid_len = len(record_indices)
+            span = self._select_bgc_span(annotator_probs[w_idx], valid_len)
+            if span is None:
+                for g_idx, rec_idx in enumerate(record_indices):
+                    bgc_prob = float(annotator_probs[w_idx, g_idx])
+                    gene_results[rec_idx] = (
+                        "NonBGC",
+                        0,
+                        1.0 - bgc_prob,
+                        [1.0 - bgc_prob] + [0.0] * len(_PROPHET_TYPE_LABELS),
+                    )
+                continue
 
-        for w_idx, w_ids in enumerate(window_gene_ids):
-            for g_idx, gid in enumerate(w_ids):
-                bgc_prob = float(annotator_probs[w_idx, g_idx])
-                type_probs = classifier_probs[w_idx]  # window-level classification
+            start_idx, end_idx = span
+            region_mask = np.zeros((1, valid_len), dtype=np.float32)
+            region_mask[0, start_idx:end_idx + 1] = 1.0
+            type_probs = self._run_classifier(
+                window_embs[w_idx:w_idx + 1, :valid_len, :],
+                region_mask,
+            )[0]
+            region_label, region_cls_idx, region_conf, region_scores = self._classify_region(type_probs)
 
-                label, cls_idx, conf, scores = self._classify_gene(bgc_prob, type_probs)
-                gene_results[gid] = (label, cls_idx, conf, scores)
+            for g_idx, rec_idx in enumerate(record_indices):
+                if start_idx <= g_idx <= end_idx:
+                    gene_results[rec_idx] = (region_label, region_cls_idx, region_conf, region_scores)
+                else:
+                    bgc_prob = float(annotator_probs[w_idx, g_idx])
+                    gene_results[rec_idx] = (
+                        "NonBGC",
+                        0,
+                        1.0 - bgc_prob,
+                        [1.0 - bgc_prob] + [0.0] * len(_PROPHET_TYPE_LABELS),
+                    )
+
+        context_predictions: Dict[Tuple[str, str, str, int, int], Tuple[str, int, float, List[float]]] = {}
+        for rec_idx, result in gene_results.items():
+            context_predictions[_gene_key(context_records[rec_idx])] = result
 
         # Build output arrays aligned with alien_records order
         class_labels = []
@@ -841,12 +906,13 @@ class ProphetBackend:
         all_scores = []
         is_bgc_flags = []
 
-        for i, rec in enumerate(alien_records):
-            gid = rec.gene_record.gene_id
-            if gid in gene_results:
-                label, cls_idx, conf, scores = gene_results[gid]
+        matched_targets = 0
+        for rec in alien_records:
+            key = _gene_key(rec.gene_record)
+            if key in context_predictions:
+                label, cls_idx, conf, scores = context_predictions[key]
+                matched_targets += 1
             else:
-                # Gene was skipped (no protein) — default to NonBGC
                 label = "NonBGC"
                 cls_idx = 0
                 conf = 0.5
@@ -857,6 +923,12 @@ class ProphetBackend:
             confidences.append(conf)
             all_scores.append(scores)
             is_bgc_flags.append(label != "NonBGC" and conf >= MED_CONF_THRESHOLD)
+
+        logger.info(
+            "  Mapped contextual predictions back to %d/%d alien genes",
+            matched_targets,
+            len(target_keys),
+        )
 
         return class_labels, class_indices, confidences, all_scores, is_bgc_flags
 
@@ -1131,7 +1203,11 @@ class BGCPredictor:
     # Public API
     # ------------------------------------------------------------------
 
-    def run(self, hgt_result: HGTResult) -> BGCResult:
+    def run(
+        self,
+        hgt_result: HGTResult,
+        all_gene_records: Optional[Sequence[GeneRecord]] = None,
+    ) -> BGCResult:
         """
         Score all alien_records from Phase 2 and return a BGCResult.
 
@@ -1162,7 +1238,7 @@ class BGCPredictor:
 
         # Route to appropriate backend
         if self._use_prophet and self._prophet is not None:
-            bgc_records = self._run_prophet(alien_records, X)
+            bgc_records = self._run_prophet(alien_records, X, all_gene_records=all_gene_records)
         else:
             bgc_records = self._run_mock(alien_records, X)
 
@@ -1189,6 +1265,7 @@ class BGCPredictor:
             "prophet_used":      self._use_prophet,
             "esm_model":         self._prophet._esm_model_name if self._use_prophet else None,
             "device":             str(self._prophet.device) if self._use_prophet else "cpu",
+            "n_context_genes":   len(all_gene_records) if all_gene_records is not None else len(alien_records),
         }
 
         logger.info(
@@ -1219,13 +1296,14 @@ class BGCPredictor:
         self,
         alien_records: List[HGTGeneRecord],
         X: np.ndarray,
+        all_gene_records: Optional[Sequence[GeneRecord]] = None,
     ) -> List[BGCGeneRecord]:
         """Run BGC-Prophet trained model inference."""
         logger.info("Phase 3 | Using BGC-Prophet trained model backend")
 
         # Run Prophet pipeline
         class_labels, class_indices, confidences, all_scores, is_bgc_flags = \
-            self._prophet.predict(alien_records)
+            self._prophet.predict(alien_records, all_gene_records=all_gene_records)
 
         # Apply keyword boosts if enabled
         if self.use_keyword_boost:
