@@ -37,6 +37,8 @@ from pipeline.phase2_visualizer import (
 )
 from pipeline.bgc_predictor import BGCPredictor, BGCResult
 from pipeline.phase3_visualizer import (
+    plot_phase3_decision_funnel,
+    plot_bgc_neighborhood_map,
     plot_bgc_class_distribution,
     plot_bgc_heatmap,
     plot_bgc_confidence_landscape,
@@ -241,6 +243,15 @@ def run_phase3(hgt_result: HGTResult, args: argparse.Namespace) -> BGCResult:
     logger.info("Generating Phase 3 visualizations ...")
     p3_dir = args.output / "phase3"
     p3_dir.mkdir(parents=True, exist_ok=True)
+    funnel_path = plot_phase3_decision_funnel(
+        bgc_result=bgc_result,
+        total_accessory_genes=len(hgt_result.hgt_records),
+        output_dir=str(p3_dir),
+    )
+    neighborhood_path = plot_bgc_neighborhood_map(
+        bgc_result=bgc_result,
+        output_dir=str(p3_dir),
+    )
 
     dist_path = plot_bgc_class_distribution(
         bgc_result=bgc_result,
@@ -257,6 +268,8 @@ def run_phase3(hgt_result: HGTResult, args: argparse.Namespace) -> BGCResult:
     render_phase3_html_report(
         bgc_result=bgc_result,
         output_dir=str(p3_dir),
+        plot_funnel_path=funnel_path,
+        plot_neighborhood_path=neighborhood_path,
         plot_distribution_path=dist_path,
         plot_heatmap_path=heatmap_path,
         plot_landscape_path=landscape_path,

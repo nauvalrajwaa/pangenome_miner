@@ -28,6 +28,17 @@ from pipeline.hgt_detective import HGTGeneRecord, HGTResult
 logger = logging.getLogger(__name__)
 
 
+def _norm01(values: List[float]) -> List[float]:
+    if not values:
+        return []
+    arr = np.asarray(values, dtype=float)
+    lo = float(arr.min())
+    hi = float(arr.max())
+    if hi <= lo:
+        return [0.5] * len(values)
+    return [float((v - lo) / (hi - lo)) for v in arr]
+
+
 # ---------------------------------------------------------------------------
 # 1. Genomic Island Architecture Plot
 # ---------------------------------------------------------------------------
@@ -39,11 +50,13 @@ def plot_genomic_island_architecture(
     max_genes: int = 120,
 ) -> Optional[Path]:
     """
-    Linear genomic map for *strain_id*:
+    Rich genomic island map for *strain_id* combining gene architecture with
+    Phase 2 evidence tracks:
       - Core/shell genes → dull gray arrows
       - HGT genes → dark red arrows
       - Self-labelled MGE genes → orange
-      - Product labels drawn inside arrows where space allows
+      - Anomaly score, GC deviation, and k-mer deviation shown per gene below
+        the backbone to explain why a region was flagged
 
     Parameters
     ----------
@@ -73,7 +86,7 @@ def plot_genomic_island_architecture(
     top_contigs = sorted(contig_map, key=lambda c: len(contig_map[c]), reverse=True)[:3]
 
     n_contigs = len(top_contigs)
-    fig_height = max(4, n_contigs * 3.5)
+    fig_height = max(4.5, n_contigs * 4.4)
     fig, axes = plt.subplots(n_contigs, 1, figsize=(18, fig_height))
     if n_contigs == 1:
         axes = [axes]
@@ -88,16 +101,48 @@ def plot_genomic_island_architecture(
         contig_start = records[0].gene_record.start
         contig_end   = records[-1].gene_record.end
         span = contig_end - contig_start + 1
+        anomaly_norm = _norm01([r.anomaly_score for r in records])
+        gc_norm = _norm01([r.gc_deviation for r in records])
+        kmer_norm = _norm01([r.kmer_deviation for r in records])
 
         ax.set_xlim(contig_start - span * 0.02, contig_end + span * 0.02)
-        ax.set_ylim(-0.8, 1.2)
-        ax.axhline(0, color="#bdc3c7", lw=1.5, zorder=1)  # backbone
+        ax.set_ylim(-1.15, 1.15)
+        ax.axhline(0.18, color="#bdc3c7", lw=1.5, zorder=1)  # backbone
+        ax.axhspan(-1.05, -0.08, color="#f8f9fb", alpha=0.85, zorder=0)
+        ax.text(
+            contig_start - span * 0.01,
+            -0.15,
+            "Anom.",
+            ha="right",
+            va="center",
+            fontsize=7,
+            color="#7f8c8d",
+        )
+        ax.text(
+            contig_start - span * 0.01,
+            -0.55,
+            "GC dev",
+            ha="right",
+            va="center",
+            fontsize=7,
+            color="#7f8c8d",
+        )
+        ax.text(
+            contig_start - span * 0.01,
+            -0.92,
+            "k-mer",
+            ha="right",
+            va="center",
+            fontsize=7,
+            color="#7f8c8d",
+        )
 
-        for rec in records:
+        for rec, anom01, gc01, kmer01 in zip(records, anomaly_norm, gc_norm, kmer_norm):
             gene = rec.gene_record
             s, e = gene.start, gene.end
             length = e - s + 1
-            y_center = 0.0
+            center = (s + e) / 2
+            y_center = 0.18
             arrow_height = 0.45
 
             # Choose colour
@@ -127,6 +172,15 @@ def plot_genomic_island_architecture(
                 zorder=zorder,
             )
 
+            evidence_color = color if rec.is_hgt or rec.mge_proximity else "#95a5a6"
+            anom_y = -0.10 - 0.28 * anom01
+            gc_y = -0.43 - 0.22 * gc01
+            kmer_y = -0.78 - 0.20 * kmer01
+            ax.vlines(center, -0.08, anom_y, color=evidence_color, linewidth=1.0, alpha=0.9, zorder=2)
+            ax.scatter(center, anom_y, s=16, color="#8e44ad", edgecolors="white", linewidths=0.3, zorder=5)
+            ax.scatter(center, gc_y, s=15, color="#1f77b4", edgecolors="white", linewidths=0.3, zorder=5)
+            ax.scatter(center, kmer_y, s=15, color="#16a085", edgecolors="white", linewidths=0.3, zorder=5)
+
             # Label HGT genes (skip tiny ones)
             if rec.is_hgt and length > span * 0.015:
                 label = gene.product[:22] if gene.product else gene.gene_id[:18]
@@ -141,9 +195,14 @@ def plot_genomic_island_architecture(
 
         # Axes labels
         n_hgt = sum(1 for r in records if r.is_hgt)
+        n_mge = sum(
+            1 for r in records
+            if r.mge_proximity and any(kw in (r.gene_record.product or "").lower() for kw in MGE_KEYWORDS)
+        )
         ax.set_title(
             f"Contig: {contig}  |  {len(records)} genes shown  |  "
-            f"{n_hgt} Alien HGT ([HGT])  |  pos {contig_start:,}\u2013{contig_end:,} bp",
+            f"{n_hgt} Alien HGT  |  {n_mge} MGE-like genes  |  "
+            f"pos {contig_start:,}\u2013{contig_end:,} bp",
             fontsize=9, loc="left",
         )
         ax.set_xlabel("Genomic position (bp)", fontsize=8)
@@ -162,9 +221,12 @@ def plot_genomic_island_architecture(
         mpatches.Patch(color="#aab7b8", label="Core / Shell gene"),
         mpatches.Patch(color="#d35400", label="Mobile Genetic Element (MGE)"),
         mpatches.Patch(color="#922b21", label="Alien HGT Region (Phase 2 flag)"),
+        mpatches.Patch(color="#8e44ad", label="Anomaly score"),
+        mpatches.Patch(color="#1f77b4", label="GC deviation"),
+        mpatches.Patch(color="#16a085", label="k-mer deviation"),
     ]
     fig.legend(handles=legend_patches, loc="lower center",
-               bbox_to_anchor=(0.5, -0.04), ncol=3, fontsize=9, frameon=True)
+               bbox_to_anchor=(0.5, -0.04), ncol=6, fontsize=9, frameon=True)
 
     plt.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -379,7 +441,7 @@ PHASE2_HTML_TEMPLATE = """\
     <h2>🗺 Genomic Island Architecture — {{ strain_id }}</h2>
     <p style="font-size:0.85rem;color:#7f8c8d;margin-bottom:0.8rem;">
       Dark red = Alien HGT Region &nbsp;|&nbsp; Orange = MGE &nbsp;|&nbsp; Gray = Core/Shell gene.
-      Gene labels shown for HGT-flagged regions.
+      Lower evidence track shows anomaly score, GC deviation, and k-mer deviation per gene.
     </p>
     <img class="plot-img" src="{{ plot_rel }}" alt="Genomic island plot {{ strain_id }}">
   </div>

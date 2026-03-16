@@ -19,6 +19,12 @@ Produces publication-ready figures and an HTML report for BGC prediction results
        Jinja2 HTML report embedding all plots, BGC stats table, and a
        per-gene predictions table.
 
+  5. plot_phase3_decision_funnel()
+       Funnel-style summary from accessory genes to high-confidence BGC hits.
+
+  6. plot_bgc_neighborhood_map()
+       Contig-level map of scored alien genes with BGC hits highlighted.
+
 All functions write outputs to an output_dir and return the file path(s).
 """
 
@@ -37,6 +43,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
+from matplotlib.figure import Figure
 from matplotlib.ticker import FixedLocator
 
 # Optional seaborn / scipy for heatmap
@@ -44,6 +51,7 @@ try:
     import seaborn as sns
     _SEABORN_AVAILABLE = True
 except ImportError:
+    sns = None
     _SEABORN_AVAILABLE = False
 
 try:
@@ -56,6 +64,8 @@ try:
     from jinja2 import Environment, BaseLoader
     _JINJA_AVAILABLE = True
 except ImportError:
+    Environment = None
+    BaseLoader = None
     _JINJA_AVAILABLE = False
 
 from pipeline.bgc_predictor import BGCResult, BGCGeneRecord, BGC_CLASSES
@@ -83,7 +93,7 @@ CONF_MARKERS = {"High": "^", "Medium": "o", "Low": "s"}
 # Helper utilities
 # ===========================================================================
 
-def _fig_to_base64(fig: plt.Figure) -> str:
+def _fig_to_base64(fig: Figure) -> str:
     """Encode matplotlib figure as base64 PNG string for HTML embedding."""
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", dpi=120)
@@ -91,12 +101,21 @@ def _fig_to_base64(fig: plt.Figure) -> str:
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
-def _save_and_close(fig: plt.Figure, path: str) -> str:
+def _save_and_close(fig: Figure, path: str) -> str:
     """Save figure to disk and close it; return path."""
     fig.savefig(path, bbox_inches="tight", dpi=150)
     plt.close(fig)
     logger.info("  Saved: %s", path)
     return path
+
+
+def _empty_plot(output_dir: str, filename: str, title: str, message: str) -> str:
+    os.makedirs(output_dir, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=13, transform=ax.transAxes, color="#6c757d")
+    ax.set_title(title, fontweight="bold")
+    ax.set_axis_off()
+    return _save_and_close(fig, os.path.join(output_dir, filename))
 
 
 # ===========================================================================
@@ -147,8 +166,8 @@ def plot_bgc_class_distribution(
     fig, ax = plt.subplots(figsize=(max(8, len(strains) * 1.8), 5))
     bottom = np.zeros(len(df))
     for cls in active_classes:
-        vals = df[cls].values
-        bars = ax.bar(df.index, vals, bottom=bottom,
+        vals = df[cls].astype(float).to_numpy()
+        bars = ax.bar(df.index, vals.tolist(), bottom=bottom.tolist(),
                       color=BGC_PALETTE[cls], label=cls, edgecolor="white", linewidth=0.5)
         # Label non-zero bars
         for bar, val in zip(bars, vals):
@@ -159,13 +178,13 @@ def plot_bgc_class_distribution(
                     str(val), ha="center", va="center",
                     fontsize=8, color="white", fontweight="bold",
                 )
-        bottom += vals
+        bottom = bottom + vals
 
     ax.set_xlabel("Strain", fontsize=11)
     ax.set_ylabel("BGC Gene Count", fontsize=11)
     ax.set_title("BGC Class Distribution per Strain", fontsize=13, fontweight="bold")
     ax.legend(title="BGC Class", bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=9)
-    xticks = ax.get_xticks()
+    xticks = list(ax.get_xticks())
     ax.xaxis.set_major_locator(FixedLocator(xticks))
     ax.set_xticklabels(df.index, rotation=20, ha="right", fontsize=9)
     ax.spines["top"].set_visible(False)
@@ -213,10 +232,11 @@ def plot_bgc_heatmap(
     matrix = pd.DataFrame(counts).T.reindex(columns=active_classes, fill_value=0)
     matrix.index = [s.replace("Streptomyces_abikoensis_", "S.ab. ") for s in matrix.index]
 
-    if _SEABORN_AVAILABLE:
+    if _SEABORN_AVAILABLE and sns is not None:
+        sns_mod = sns
         # Use custom palette: white → class-specific dark colour
-        cmap = sns.light_palette("#E63946", as_cmap=True)
-        g = sns.clustermap(
+        cmap = sns_mod.light_palette("#E63946", as_cmap=True)
+        g = sns_mod.clustermap(
             matrix,
             cmap=cmap,
             annot=True,
@@ -253,6 +273,134 @@ def plot_bgc_heatmap(
         ax.set_title("Phylogenomic BGC Heatmap", fontsize=13, fontweight="bold")
         plt.tight_layout()
         return _save_and_close(fig, outpath)
+
+
+def plot_phase3_decision_funnel(
+    bgc_result: BGCResult,
+    total_accessory_genes: int,
+    output_dir: str,
+    filename: str = "bgc_decision_funnel.png",
+) -> str:
+    if total_accessory_genes <= 0:
+        return _empty_plot(output_dir, filename, "Phase 3 Decision Funnel", "No accessory genes available")
+
+    os.makedirs(output_dir, exist_ok=True)
+    outpath = os.path.join(output_dir, filename)
+    n_scored = int(bgc_result.stats.get("n_alien_scored", len(bgc_result.bgc_records)))
+    n_hits = int(bgc_result.stats.get("n_bgc_hits", len(bgc_result.bgc_hits)))
+    n_high = int(bgc_result.stats.get("n_high_confidence", 0))
+    stages = [
+        ("Accessory genes", int(total_accessory_genes), "Phase 2 input universe"),
+        ("Alien HGT genes", n_scored, "Genes passed into Phase 3"),
+        ("BGC hits", n_hits, "Predicted BGC-associated genes"),
+        ("High-confidence hits", n_high, "Most actionable candidates"),
+    ]
+    max_count = max(count for _, count, _ in stages) or 1
+    widths = [float(count) / float(max_count) for _, count, _ in stages]
+
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    ypos = np.arange(len(stages))[::-1]
+    colors = ["#a8dadc", "#457b9d", "#e76f51", "#2a9d8f"]
+    ax.barh(ypos, widths, color=colors, height=0.72, edgecolor="white")
+
+    for y, width, (label, count, note) in zip(ypos, widths, stages):
+        ax.text(0.02, y, label, va="center", ha="left", fontsize=11, fontweight="bold", color="#1d3557")
+        ax.text(min(width + 0.02, 0.98), y, f"{count:,}", va="center", ha="left", fontsize=11, fontweight="bold")
+        ax.text(0.02, y - 0.26, note, va="center", ha="left", fontsize=8.5, color="#6c757d")
+
+    ax.set_xlim(0, 1.05)
+    ax.set_ylim(-0.8, len(stages) - 0.2)
+    ax.set_yticks([])
+    ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+    ax.xaxis.set_major_locator(FixedLocator([0.0, 0.25, 0.5, 0.75, 1.0]))
+    ax.set_xticklabels(["0%", "25%", "50%", "75%", "100%"])
+    ax.set_xlabel("Fraction of accessory genes retained", fontsize=10)
+    ax.set_title("Phase 2 → Phase 3 Candidate Funnel", fontsize=13, fontweight="bold")
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    plt.tight_layout()
+    return _save_and_close(fig, outpath)
+
+
+def plot_bgc_neighborhood_map(
+    bgc_result: BGCResult,
+    output_dir: str,
+    filename: str = "bgc_neighborhood_map.png",
+    max_regions: int = 6,
+) -> str:
+    if not bgc_result.bgc_records:
+        return _empty_plot(output_dir, filename, "BGC Neighborhood Map", "No alien genes were scored")
+
+    os.makedirs(output_dir, exist_ok=True)
+    outpath = os.path.join(output_dir, filename)
+    grouped: Dict[tuple[str, str], List[BGCGeneRecord]] = {}
+    for rec in bgc_result.bgc_records:
+        grouped.setdefault((rec.strain_id, rec.contig_id), []).append(rec)
+
+    ranked_regions = sorted(
+        grouped.items(),
+        key=lambda item: (
+            sum(1 for rec in item[1] if rec.is_bgc),
+            max((rec.confidence for rec in item[1]), default=0.0),
+            len(item[1]),
+        ),
+        reverse=True,
+    )
+    ranked_regions = [item for item in ranked_regions if any(rec.is_bgc for rec in item[1])][:max_regions]
+    if not ranked_regions:
+        return _empty_plot(output_dir, filename, "BGC Neighborhood Map", "No BGC hits available for neighborhood mapping")
+
+    fig, axes = plt.subplots(len(ranked_regions), 1, figsize=(15, max(4.5, len(ranked_regions) * 2.4)))
+    if len(ranked_regions) == 1:
+        axes = [axes]
+
+    for ax, ((strain_id, contig_id), region_records) in zip(axes, ranked_regions):
+        records = sorted(region_records, key=lambda rec: rec.hgt_record.gene_record.start)
+        starts = [rec.hgt_record.gene_record.start for rec in records]
+        ends = [rec.hgt_record.gene_record.end for rec in records]
+        centers = [0.5 * (s + e) for s, e in zip(starts, ends)]
+        confidences = [rec.confidence for rec in records]
+        sizes = [40 + conf * 240 for conf in confidences]
+
+        ax.hlines(0, starts[0], ends[-1], color="#ced4da", linewidth=2.0, zorder=1)
+        for rec, center, size in zip(records, centers, sizes):
+            color = BGC_PALETTE.get(rec.bgc_class, "#999999") if rec.is_bgc else "#adb5bd"
+            marker = CONF_MARKERS.get(rec.confidence_tier, "o")
+            ax.scatter(center, 0, s=size, color=color, marker=marker, edgecolors="white", linewidths=0.6, alpha=0.95, zorder=3)
+            ax.vlines(
+                [rec.hgt_record.gene_record.start, rec.hgt_record.gene_record.end],
+                -0.08,
+                0.08,
+                color="#adb5bd",
+                linewidth=0.8,
+                zorder=2,
+            )
+
+        top_hits = [rec for rec in records if rec.is_bgc]
+        top_hits = sorted(top_hits, key=lambda rec: rec.confidence, reverse=True)[:3]
+        for rec in top_hits:
+            center = 0.5 * (rec.hgt_record.gene_record.start + rec.hgt_record.gene_record.end)
+            label = rec.hgt_record.gene_record.product or rec.gene_id
+            ax.text(center, 0.2, label[:28], ha="center", va="bottom", fontsize=7.5, color="#343a40")
+
+        n_hits = sum(1 for rec in records if rec.is_bgc)
+        ax.set_title(
+            f"{strain_id} | {contig_id} | {n_hits} BGC hits across {len(records)} scored alien genes",
+            fontsize=9.5,
+            loc="left",
+        )
+        ax.set_yticks([])
+        ax.set_xlabel("Genomic position (bp)", fontsize=8)
+        ax.spines[["top", "right", "left"]].set_visible(False)
+        ax.tick_params(axis="x", labelsize=8)
+
+    legend_handles = [
+        mpatches.Patch(color="#adb5bd", label="Scored alien gene (NonBGC)"),
+        mpatches.Patch(color="#e76f51", label="BGC hit (class-coloured)"),
+    ]
+    fig.legend(handles=legend_handles, loc="lower center", bbox_to_anchor=(0.5, -0.02), ncol=2, frameon=True, fontsize=9)
+    fig.suptitle("Contig-Level BGC Hit Neighborhoods", fontsize=13, fontweight="bold", y=1.01)
+    plt.tight_layout()
+    return _save_and_close(fig, outpath)
 
 
 # ===========================================================================
@@ -416,6 +564,20 @@ _PHASE3_TEMPLATE = """
 </div>
 
 <!-- Plots -->
+{% if plot_funnel %}
+<div class="plot-card">
+  <h3>Phase 2 → Phase 3 Candidate Funnel</h3>
+  <img src="data:image/png;base64,{{ plot_funnel }}" alt="Phase 3 funnel">
+</div>
+{% endif %}
+
+{% if plot_neighborhood %}
+<div class="plot-card">
+  <h3>Contig-Level BGC Hit Neighborhoods</h3>
+  <img src="data:image/png;base64,{{ plot_neighborhood }}" alt="BGC neighborhood map">
+</div>
+{% endif %}
+
 {% if plot_distribution %}
 <div class="plot-card">
   <h3>BGC Class Distribution per Strain</h3>
@@ -475,6 +637,8 @@ _PHASE3_TEMPLATE = """
 def render_phase3_html_report(
     bgc_result: BGCResult,
     output_dir: str,
+    plot_funnel_path: Optional[str] = None,
+    plot_neighborhood_path: Optional[str] = None,
     plot_distribution_path: Optional[str] = None,
     plot_heatmap_path: Optional[str] = None,
     plot_landscape_path: Optional[str] = None,
@@ -500,7 +664,7 @@ def render_phase3_html_report(
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    if not _JINJA_AVAILABLE:
+    if not _JINJA_AVAILABLE or Environment is None or BaseLoader is None:
         logger.error("Jinja2 not installed — skipping HTML report")
         return ""
 
@@ -521,6 +685,8 @@ def render_phase3_html_report(
         top_predictions     = top_preds[:max_table_rows],
         total_bgc           = len(bgc_result.bgc_hits),
         max_rows            = max_table_rows,
+        plot_funnel         = _embed(plot_funnel_path),
+        plot_neighborhood   = _embed(plot_neighborhood_path),
         plot_distribution   = _embed(plot_distribution_path),
         plot_heatmap        = _embed(plot_heatmap_path),
         plot_landscape      = _embed(plot_landscape_path),
