@@ -109,25 +109,29 @@ It ingests raw genome assemblies (FASTA) and their NCBI PGAP or Prokka annotatio
 ╔═════════════════════════════════════════════════════════════════════════╗
 ║  PHASE 3 — BGC-Prophet AI Predictor (bgc_predictor.py)                 ║
 ║                                                                         ║
-║  Input: HGT-flagged alien gene records from Phase 2                    ║
+║  Input: full ordered gene list for each strain/contig + Alien_HGT tags ║
 ║                                                                         ║
 ║  Step 1 — Protein translation:                                          ║
 ║    └── CDS DNA → amino acid sequences (BioPython Seq.translate)        ║
 ║                                                                         ║
 ║  Step 2 — ESM2 protein embeddings:                                      ║
 ║    └── ESM2 model (configurable, default: esm2_t6_8M_UR50D)           ║
-║        Per-protein mean-pooled embedding (320-dim after projection)     ║
+║        Per-protein mean-pooled embedding at the model's native dim     ║
 ║                                                                         ║
 ║  Step 3 — BGC-Prophet Annotator (TransformerEncoder):                   ║
-║    └── 128-gene windows → per-gene BGC probability (sigmoid)           ║
+║    └── 128-gene windows in genomic order → per-gene BGC probability    ║
 ║        Genes with P(BGC) ≥ 0.50 → flagged as biosynthetic              ║
 ║                                                                         ║
-║  Step 4 — BGC-Prophet Classifier (TransformerEncoder):                  ║
-║    └── 7-class sigmoid classification of BGC-positive windows          ║
+║  Step 4 — Upstream output filtering:                                    ║
+║    └── longest BGC span per window (threshold=0.5, max_gap=3,         ║
+║        min_count=2)                                                     ║
+║                                                                         ║
+║  Step 5 — BGC-Prophet Classifier (TransformerEncoder):                  ║
+║    └── 7-class sigmoid classification of selected BGC spans           ║
 ║        Classes: Alkaloid | Terpene | NRP | Polyketide | RiPP |         ║
 ║                 Saccharide | Other                                      ║
 ║                                                                         ║
-║  Step 5 — Keyword boost (optional):                                     ║
+║  Step 6 — Keyword boost (optional):                                     ║
 ║    └── Product annotation keywords boost matching class scores          ║
 ║                                                                         ║
 ║  Outputs:  BGCResult dataclass                                          ║
@@ -228,7 +232,10 @@ HGTDetective(
 hgt_result: HGTResult = detective.run(phase1_result, fasta_store)
 ```
 
-`alien_records` — the subset of HGT-flagged records — is the sole input to Phase 3.
+`alien_records` provide the reporting targets for Phase 3, but the BGC-Prophet
+windows are now built from the full ordered gene list of each strain/contig so
+the model sees genomic context before predictions are intersected back onto the
+Phase 2 `Alien_HGT` genes.
 
 ---
 
@@ -238,7 +245,7 @@ hgt_result: HGTResult = detective.run(phase1_result, fasta_store)
 
 ### What it does
 
-Phase 3 asks: *"Among the alien genes found by Phase 2, which ones are part of a Biosynthetic Gene Cluster?"* It uses the **BGC-Prophet** trained model — a TransformerEncoder architecture powered by ESM2 protein language model embeddings — to perform gene-level BGC annotation and type classification.
+Phase 3 asks: *"Among the alien genes found by Phase 2, which ones fall inside BGC-like regions when the full genomic neighborhood is considered?"* It uses the **BGC-Prophet** trained model — a TransformerEncoder architecture powered by ESM2 protein language model embeddings — to reproduce the upstream `predict -> output -> classify` logic on ordered genes, then reports the subset overlapping `Alien_HGT` genes.
 
 ### BGC-Prophet Model
 
@@ -282,16 +289,20 @@ CDS DNA sequences (from Phase 1)
 └────────────┬────────────────┘
              ▼
 ┌─────────────────────────────┐
-│  BGC-Prophet Annotator      │  Per-gene: BGC or Non-BGC
+│  BGC-Prophet Annotator      │  Per-gene: BGC probability in full-context windows
 │  (TransformerEncoder)       │  threshold ≥ 0.50
 └────────────┬────────────────┘
              ▼
 ┌─────────────────────────────┐
-│  BGC-Prophet Classifier     │  Per-window: 7-class BGC type
-│  (TransformerEncoder)       │  + keyword boost scoring
+│  Upstream Output Step       │  longest BGC span with max_gap=3, min_count=2
 └────────────┬────────────────┘
              ▼
-   BGCGeneRecord per gene
+┌─────────────────────────────┐
+│  BGC-Prophet Classifier     │  Classify selected BGC region in its sentence
+│  (TransformerEncoder)       │  + optional keyword boost scoring
+└────────────┬────────────────┘
+             ▼
+   BGCGeneRecord per Alien_HGT gene
    BGCResult with statistics
 ```
 
@@ -307,6 +318,10 @@ BGCPredictor(
 )
 bgc_result: BGCResult = predictor.run(hgt_result)
 ```
+
+In the CLI pipeline, `main.py` now calls the predictor with the full Phase 1
+gene list as context while still emitting predictions only for Phase 2
+`alien_records`.
 
 ### Fallback Mode
 
@@ -547,7 +562,7 @@ output/
     ├── bgc_heatmap.png                  # per-strain × BGC class heatmap
     ├── bgc_confidence_landscape.png     # anomaly score vs BGC confidence scatter
     ├── phase3_report.html              # HTML report with predictions table
-    └── prediction_matrix.csv           # full per-gene prediction scores (8 classes)
+    └── prediction_matrix.csv           # per-Alien_HGT gene scores after full-context BGC calling
 ```
 
 ---
