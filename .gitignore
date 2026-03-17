@@ -53,6 +53,11 @@ pyrightconfig.json
 # Generated artefacts — never commit, always re-run the pipeline
 output/
 tests/output/
+tmp_check_output/
+tmp_phase3_fix_check/
+tmp_phase3_fix_check2/
+tmp_phase3_full_context/
+tmp_bgp/
 
 # ─── Large data files ─────────────────────────────────────────────────────────
 # Genome assemblies & annotations (typically hundreds of MB)
@@ -62,6 +67,16 @@ tests/real_data/genomes/*.fasta
 tests/real_data/genomes/*.fa
 tests/real_data/annotations/*.gff
 tests/real_data/annotations/*.gff3
+tests/real_data_2/ncbi_raw/
+tests/real_data_2/*.zip
+tests/real_data_2/genomes/*.fna
+tests/real_data_2/genomes/*.fasta
+tests/real_data_2/genomes/*.fa
+tests/real_data_2/annotations/*.gff
+tests/real_data_2/annotations/*.gff3
+mock_data/genomes/
+mock_data/annotations/
+data/
 
 # Other common sequence data formats
 *.fastq
@@ -126,3 +141,7 @@ secrets.json
 *.bak
 *.orig
 .sisyphus/
+trainer_log.txt
+sequence.gbk
+feature.txt
+test_gpu_collab.txt
